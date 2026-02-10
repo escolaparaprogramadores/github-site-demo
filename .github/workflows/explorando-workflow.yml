@@ -1,7 +1,7 @@
 name: Detalhes do Workflow
 
-on: push
-  workflow_dispatch:
+on:
+  push:
 
 jobs:
   workflow-info:
