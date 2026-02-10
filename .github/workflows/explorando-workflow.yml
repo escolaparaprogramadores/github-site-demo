@@ -1,13 +1,11 @@
 name: Detalhes workflow
 on:
   workflow_dispatch:
-
 jobs:
   workflow-info:
     runs-on: ubuntu-latest
     env:
       HELLO_WORLD: "Hello, World!"
-
     steps:
       - name: Print Hello World
         run: echo "${{ env.HELLO_WORLD }}"
