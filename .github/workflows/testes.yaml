@@ -15,7 +15,30 @@ jobs:
       - name: Run tests
         run: npm test
 
+  sonar:
+    needs: [run-tests]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build sonar
+        run: echo "Building sonar..."
+
+  taac:
+    needs: [sonar]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build taac
+        run: echo "Building taac..."
+
   deploy:
+    needs: [taac]
     runs-on: ubuntu-latest
 
     steps:
@@ -24,4 +47,7 @@ jobs:
 
       - name: Build app
         run: echo "Building app..."
+
+
+
 
