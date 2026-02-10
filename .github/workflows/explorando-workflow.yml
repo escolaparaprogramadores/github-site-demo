@@ -1,6 +1,6 @@
 name: Detalhes do Workflow
 
-on:
+on: push
   workflow_dispatch:
 
 jobs:
@@ -64,6 +64,7 @@ jobs:
 
       - name: Build app
         run: echo "Building app..."
+
 
 
 
