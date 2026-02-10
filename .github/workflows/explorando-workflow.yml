@@ -1,6 +1,8 @@
-name: Detalhes workflow
+name: Detalhes do workflow
+
 on:
   workflow_dispatch:
+
 jobs:
   workflow-info:
     runs-on: ubuntu-latest
