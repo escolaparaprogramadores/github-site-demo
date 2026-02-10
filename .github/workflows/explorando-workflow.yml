@@ -1,12 +1,15 @@
-name: Detalhes workflow
+name: Detalhes do Workflow
 
 on:
   workflow_dispatch:
+
 jobs:
   workflow-info:
     runs-on: ubuntu-latest
+
     env:
       HELLO_WORLD: "Hello, World!"
+
     steps:
       - name: Print Hello World
         run: echo "${{ env.HELLO_WORLD }}"
@@ -15,7 +18,3 @@ jobs:
         run: |
           echo "GITHUB_REPOSITORY: $GITHUB_REPOSITORY"
           echo "${{ toJson(github) }}"
-  
-
-
-
