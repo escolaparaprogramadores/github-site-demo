@@ -1,0 +1,73 @@
+name: Detalhes workflow
+on:
+  push:
+
+jobs:
+on:
+  workflow_dispatch:
+
+jobs:
+  workflow-info:
+    runs-on: ubuntu-latest
+
+    env:
+      HELLO_WORLD: "Hello, World!"
+
+    steps:
+      - name: Print Hello World
+        run: echo "${{ env.HELLO_WORLD }}"
+
+      - name: Show github context
+        run: |
+          echo "GITHUB_REPOSITORY: $GITHUB_REPOSITORY"
+          echo "${{ toJson(github) }}"
+  run-tests:
+    runs-on: ubuntu-latest
+    
+    needs: [workflow-info]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run tests
+        run: npm test
+
+  sonar:
+    needs: [run-tests]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build sonar
+        run: echo "Building sonar..."
+
+  taac:
+    needs: [sonar]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build taac
+        run: echo "Building taac..."
+
+  deploy:
+    needs: [taac]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build app
+        run: echo "Building app..."
+
+
+
+
