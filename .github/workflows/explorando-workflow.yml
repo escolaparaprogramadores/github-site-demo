@@ -1,15 +1,10 @@
 name: Detalhes workflow
 on:
-  push:
-
-jobs:
-on:
   workflow_dispatch:
-
+  
 jobs:
   workflow-info:
     runs-on: ubuntu-latest
-
     env:
       HELLO_WORLD: "Hello, World!"
 
