@@ -35,3 +35,4 @@ jobs:
             --base develop \
             --title "Merge $BRANCH -> develop" \
             --body "PR automática criada a partir de push em $BRANCH."
+
