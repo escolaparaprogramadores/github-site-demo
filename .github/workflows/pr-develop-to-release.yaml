@@ -1,4 +1,4 @@
-name: Create Release PR (release/* -> main)
+name: Create Release PR (release/* -> main).
 
 on:
   workflow_run:
