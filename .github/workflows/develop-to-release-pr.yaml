@@ -32,3 +32,4 @@ jobs:
             PR automática gerada quando o CI do develop passou.
             Release branch: release/${{ github.run_number }}
             Base: main
+
