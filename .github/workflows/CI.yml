@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "feature/**"
+      - "hotfix/**"
+      - "develop"
+      - "release/**"
+  pull_request:
+    branches:
+      - "develop"
+      - "main"
+      - "release/**"
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # EXEMPLO (troque para seu stack .NET/Node/etc)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
