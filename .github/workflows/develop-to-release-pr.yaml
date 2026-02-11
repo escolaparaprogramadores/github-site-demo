@@ -1,4 +1,4 @@
-name: Create Release PR (develop -> release/*)
+name: Create Release PR (release/* -> main)
 
 on:
   workflow_run:
@@ -15,14 +15,20 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Create PR develop -> release/<run_number>
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+
+      - name: Create release branch and PR to main
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          base: develop
+          commit-message: "chore: create release ${{ github.run_number }}"
           branch: release/${{ github.run_number }}
+          base: main
           title: "Release ${{ github.run_number }}"
           body: |
-            PR automática para criar a branch de release.
-            Origem: develop
-            Destino: release/${{ github.run_number }}
+            PR automática gerada quando o CI do develop passou.
+            Release branch: release/${{ github.run_number }}
+            Base: main
