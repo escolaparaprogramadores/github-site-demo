@@ -35,8 +35,7 @@ describe('HTML Tests', function() {
             }
             const dom = new JSDOM(data);
             const linkStylesheet = dom.window.document.querySelector('link[href="assets/css/style.css"]');
-            expect(linkStylesheet).to.be.null;
-            //expect(linkStylesheet).to.not.be.null;
+            expect(linkStylesheet).to.not.be.null;
             done();
         });
     });
