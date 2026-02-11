@@ -1,0 +1,53 @@
+name: Create Release PR (release/* -> main)
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    branches: ["develop"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  create_release_pr:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout develop (full)
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - name: Create release branch from develop and push
+        run: |
+          RELEASE_BRANCH="release/${{ github.run_number }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$RELEASE_BRANCH"
+          git push -u origin "$RELEASE_BRANCH"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create PR release -> main (if not exists)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_BRANCH="release/${{ github.run_number }}"
+
+          EXISTING=$(gh pr list --head "$RELEASE_BRANCH" --base main --state open --json number --jq '.[0].number' || true)
+          if [ -n "$EXISTING" ]; then
+            echo "PR already exists: #$EXISTING"
+            exit 0
+          fi
+
+          gh pr create \
+            --head "$RELEASE_BRANCH" \
+            --base main \
+            --title "Release ${{ github.run_number }}" \
+            --body "Criada automaticamente após CI do develop passar."
