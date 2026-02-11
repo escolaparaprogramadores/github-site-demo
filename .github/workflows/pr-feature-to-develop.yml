@@ -13,6 +13,9 @@ jobs:
   open_pr:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
       - name: Create PR if not exists
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
