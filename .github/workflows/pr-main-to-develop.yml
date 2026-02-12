@@ -1,4 +1,3 @@
-# .github/workflows/pr-main-to-develop.yml
 name: PR main -> develop (back-merge)
 
 on:
