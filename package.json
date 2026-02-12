@@ -4,14 +4,15 @@
     "description": "Site que faz parte do materiad para o curso de Github Actions",
     "main": "index.js",
     "scripts": {
-      "test": "mocha tests"
+      "test": "mocha \"tests/**/*.js\"",
+      "test:coverage": "nyc --reporter=lcov --reporter=text mocha \"tests/**/*.js\""
     },
     "dependencies": {
       "chai": "^4.3.4",
       "mocha": "^9.1.3",
       "jsdom": "^19.0.0"
     },
-    "author": "Bruno Brito",
+    "author": "Mark Roger",
     "license": "MIT"
   }
   
