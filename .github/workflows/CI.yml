@@ -50,6 +50,11 @@ jobs:
         env:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=keephouse
+            -Dsonar.projectName=keephouse
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
 
   deploy:
     needs: [run-tests, sonar]
