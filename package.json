@@ -1,18 +1,19 @@
 {
-    "name": "github-actions-site",
-    "version": "1.0.0",
-    "description": "Site que faz parte do materiad para o curso de Github Actions",
-    "main": "index.js",
-    "scripts": {
-      "test": "mocha \"tests/**/*.js\"",
-      "test:coverage": "nyc --reporter=lcov --reporter=text mocha \"tests/**/*.js\""
-    },
-    "dependencies": {
-      "chai": "^4.3.4",
-      "mocha": "^9.1.3",
-      "jsdom": "^19.0.0"
-    },
-    "author": "Mark Roger",
-    "license": "MIT"
+  "name": "github-actions-site",
+  "version": "1.0.0",
+  "description": "Site que faz parte do materiad para o curso de Github Actions",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha \"tests/**/*.js\"",
+    "test:coverage": "nyc --reporter=lcov --reporter=text mocha \"tests/**/*.js\""
+  },
+  "dependencies": {},
+  "author": "Mark Roger",
+  "license": "MIT",
+  "devDependencies": {
+    "chai": "^4.5.0",
+    "jsdom": "^19.0.0",
+    "mocha": "^9.2.2",
+    "nyc": "^17.1.0"
   }
-  
+}
