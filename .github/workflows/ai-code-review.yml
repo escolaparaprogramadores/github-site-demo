@@ -1,4 +1,101 @@
-      - name: AI review and comment
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [labeled, synchronize, opened, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ai-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ai_review:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check AI_REVIEW_ENABLED
+        run: |
+          if [ "${{ secrets.AI_REVIEW_ENABLED }}" != "true" ]; then
+            echo "AI_REVIEW_ENABLED != true. Encerrando."
+            exit 0
+          fi
+
+      # 🔥 Gate: só roda se PR for para main OU se tiver label ai-review
+      - name: Gate - run only when needed
+        id: gate
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          LABEL_NAME: ${{ github.event.label.name }}
+        run: |
+          SHOULD_RUN="false"
+
+          # roda sempre se PR for para main
+          if [ "$BASE_REF" = "main" ]; then
+            SHOULD_RUN="true"
+          fi
+
+          # roda quando label ai-review for aplicada
+          if [ "$LABEL_NAME" = "ai-review" ]; then
+            SHOULD_RUN="true"
+          fi
+
+          echo "should_run=$SHOULD_RUN" >> $GITHUB_OUTPUT
+          echo "SHOULD_RUN=$SHOULD_RUN"
+
+      - name: Stop if not needed
+        if: ${{ steps.gate.outputs.should_run != 'true' }}
+        run: |
+          echo "Gate bloqueou execução (sem label ai-review e não é PR para main)."
+          exit 0
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 🔥 Seleciona arquivos relevantes e pega um diff pequeno
+      - name: Build minimal diff
+        id: diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -e
+
+          # arquivos alterados (top 10)
+          gh pr diff "$PR" --name-only > files_all.txt
+
+          # filtra extensões úteis + remove lixo
+          grep -E '\.(js|ts|jsx|tsx|cs|py|java|go|rb|php|kt|swift|sql)$' files_all.txt \
+            | grep -vE '(^|/)(node_modules|dist|build|coverage|.next|out|vendor)/' \
+            | grep -vE '\.min\.' \
+            | head -n 10 > files.txt || true
+
+          if [ ! -s files.txt ]; then
+            echo "Nenhum arquivo relevante encontrado. Encerrando."
+            echo "has_diff=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Arquivos revisados:"
+          cat files.txt
+
+          # diff limitado (top 200 linhas)
+          gh pr diff "$PR" -- $(cat files.txt) | head -n 200 > pr.diff
+
+          echo "has_diff=true" >> $GITHUB_OUTPUT
+
+      - name: Stop if no diff
+        if: ${{ steps.diff.outputs.has_diff != 'true' }}
+        run: |
+          echo "Sem diff relevante."
+          exit 0
+
+      # 🔥 Cria/atualiza um único comentário
+      - name: AI review and upsert comment
         continue-on-error: true
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -6,34 +103,28 @@
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           python3 - << 'PY'
-          import os, subprocess, json, urllib.request
+          import os, json, urllib.request, subprocess
+          from urllib.error import HTTPError
 
-          pr_number = os.environ["PR_NUMBER"]
+          pr = os.environ["PR_NUMBER"]
           api_key = os.environ["OPENAI_API_KEY"]
 
-          # Pega só nomes dos arquivos alterados (bem mais leve)
-          result = subprocess.run(
-              ["gh", "pr", "diff", pr_number, "--name-only"],
-              capture_output=True,
-              text=True
+          with open("pr.diff", "r", encoding="utf-8", errors="ignore") as f:
+              diff = f.read()
+
+          diff = diff[:2500]  # 🔥 agressivo
+
+          prompt = (
+              "Faça um code review MUITO curto (máx 6 bullets). "
+              "Aponte apenas bugs/riscos e melhorias diretas. "
+              "Não invente contexto.\n\nDIFF:\n" + diff
           )
 
-          files = result.stdout.strip().split("\n")[:5]  # só 5 arquivos
-          content = "\n".join(files)
-
-          # Limite agressivo
-          content = content[:1000]
-
           payload = {
-              "model": "gpt-4.1-mini",
-              "messages": [
-                  {
-                      "role": "user",
-                      "content": f"Revise brevemente estes arquivos alterados e aponte até 5 riscos técnicos:\n{content}"
-                  }
-              ],
+              "model": "gpt-4o-mini",
+              "messages": [{"role": "user", "content": prompt}],
               "temperature": 0,
-              "max_tokens": 150
+              "max_tokens": 180
           }
 
           try:
@@ -45,15 +136,30 @@
                   },
                   data=json.dumps(payload).encode("utf-8"),
               )
-
               with urllib.request.urlopen(req, timeout=30) as resp:
                   data = json.loads(resp.read().decode("utf-8"))
-
               review = data["choices"][0]["message"]["content"].strip()
+          except HTTPError as e:
+              if e.code == 429:
+                  review = "⚠️ Rate limit atingido (429). Tente novamente em 1-2 minutos."
+              else:
+                  raise
 
-              body = "## 🤖 AI Code Review\n\n" + review
-              subprocess.run(["gh", "pr", "comment", pr_number, "--body", body], check=True)
+          marker = "<!-- AI_REVIEW_COMMENT -->"
+          body = f"{marker}\n## 🤖 AI Code Review\n\n{review}"
 
-          except Exception:
-              print("Falhou ou rate limit. Pulando review.")
+          # procura comentário existente com marker
+          existing = subprocess.run(
+              ["gh", "pr", "view", pr, "--json", "comments", "--jq",
+               f'.comments[] | select(.body | contains("{marker}")) | .id'],
+              capture_output=True, text=True
+          ).stdout.strip()
+
+          if existing:
+              subprocess.run(["gh", "api", f"repos/{{owner}}/{{repo}}/issues/comments/{existing}",
+                              "-X", "PATCH", "-f", f"body={body}"], check=True)
+              print("Comentário atualizado.")
+          else:
+              subprocess.run(["gh", "pr", "comment", pr, "--body", body], check=True)
+              print("Comentário criado.")
           PY
