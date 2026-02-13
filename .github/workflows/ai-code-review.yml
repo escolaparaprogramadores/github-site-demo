@@ -24,7 +24,7 @@ jobs:
     steps:
       - name: Check AI_REVIEW_ENABLED
         run: |
-          if [ "${{ var.AI_REVIEW_ENABLED }}" != "true" ]; then
+          if [ "${{ secrets.AI_REVIEW_ENABLED }}" != "true" ]; then
             echo "AI_REVIEW_ENABLED != true. Encerrando."
             exit 0
           fi
