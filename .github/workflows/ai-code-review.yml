@@ -9,14 +9,12 @@ permissions:
   contents: read
   pull-requests: write
 
-# Evita vários runs simultâneos (reduz 429) e mantém só o mais recente por PR
 concurrency:
   group: ai-review-${{ github.repository }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_sha }}
   cancel-in-progress: true
 
 jobs:
   ai_review:
-    # Só roda se o CI terminou com sucesso (o toggle fica num step, pq secrets não funciona no if do job com workflow_run)
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
@@ -38,11 +36,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Melhor fonte: payload do workflow_run (quando veio de PR)
           PR_NUMBER="${{ github.event.workflow_run.pull_requests[0].number }}"
           echo "PR_NUMBER(from payload)=$PR_NUMBER"
 
-          # Fallback: tenta mapear PR pelo SHA
           if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
             PR_NUMBER=$(gh api \
               repos/${{ github.repository }}/commits/${{ github.event.workflow_run.head_sha }}/pulls \
@@ -65,7 +61,7 @@ jobs:
         run: |
           gh pr diff ${{ steps.pr.outputs.pr_number }} > pr.diff
 
-            - name: AI review and comment
+      - name: AI review and comment
         if: ${{ steps.pr.outputs.pr_number != '' }}
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -82,7 +78,7 @@ jobs:
           with open("pr.diff", "r", encoding="utf-8", errors="ignore") as f:
               diff = f.read()
 
-          MAX_CHARS = 15000  # ↓ reduzimos para aliviar rate limit
+          MAX_CHARS = 15000
           if len(diff) > MAX_CHARS:
               diff = diff[:MAX_CHARS] + "\n\n[DIFF TRUNCADO POR LIMITE]"
 
@@ -154,4 +150,3 @@ jobs:
           body = "## 🤖 AI Code Review\n\n" + review
           subprocess.run(["gh", "pr", "comment", pr_number, "--body", body], check=True)
           PY
-
