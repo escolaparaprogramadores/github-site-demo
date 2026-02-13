@@ -16,15 +16,18 @@ concurrency:
 
 jobs:
   ai_review:
-    # Só roda se o CI terminou com sucesso e se está habilitado (você criou como SECRET)
-    if: >
-      ${{
-        github.event.workflow_run.conclusion == 'success' &&
-        secrets.AI_REVIEW_ENABLED == 'true'
-      }}
+    # Só roda se o CI terminou com sucesso (o toggle fica num step, pq secrets não funciona no if do job com workflow_run)
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check AI_REVIEW_ENABLED
+        run: |
+          if [ "${{ secrets.AI_REVIEW_ENABLED }}" != "true" ]; then
+            echo "AI_REVIEW_ENABLED != true. Encerrando."
+            exit 0
+          fi
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
