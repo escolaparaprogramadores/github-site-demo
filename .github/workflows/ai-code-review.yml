@@ -65,7 +65,7 @@ jobs:
         run: |
           gh pr diff ${{ steps.pr.outputs.pr_number }} > pr.diff
 
-      - name: AI review and comment
+            - name: AI review and comment
         if: ${{ steps.pr.outputs.pr_number != '' }}
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -73,74 +73,85 @@ jobs:
           PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
         run: |
           python3 - << 'PY'
-          import os, subprocess, json, urllib.request, time
+          import os, subprocess, json, urllib.request, time, random
           from urllib.error import HTTPError, URLError
 
           pr_number = os.environ["PR_NUMBER"]
+          api_key = os.environ["OPENAI_API_KEY"]
 
           with open("pr.diff", "r", encoding="utf-8", errors="ignore") as f:
               diff = f.read()
 
-          MAX_CHARS = 20000
+          MAX_CHARS = 15000  # ↓ reduzimos para aliviar rate limit
           if len(diff) > MAX_CHARS:
               diff = diff[:MAX_CHARS] + "\n\n[DIFF TRUNCADO POR LIMITE]"
 
           prompt = f"""
           Você é um revisor sênior. Faça code review do DIFF abaixo.
           Foco: Clean Code, SOLID, Clean Architecture, KISS, DRY, YAGNI.
-          Regras:
-          - Seja direto (bullets).
-          - Aponte riscos (bugs, edge cases, segurança), legibilidade, testes e design.
-          - Sugira mudanças concretas quando possível.
-          - Não invente contexto fora do diff.
+          Seja direto em bullets. Aponte riscos e melhorias.
 
           DIFF:
           {diff}
           """
 
-          api_key = os.environ["OPENAI_API_KEY"]
-
           payload = {
               "model": "gpt-4.1-mini",
               "messages": [
-                  {"role": "system", "content": "Você é um revisor de código extremamente criterioso e pragmático."},
+                  {"role": "system", "content": "Você é um revisor extremamente criterioso."},
                   {"role": "user", "content": prompt},
               ],
               "temperature": 0.2,
-              "max_tokens": 900
+              "max_tokens": 800
           }
 
-          req = urllib.request.Request(
-              "https://api.openai.com/v1/chat/completions",
-              headers={
-                  "Content-Type": "application/json",
-                  "Authorization": f"Bearer {api_key}",
-              },
-              data=json.dumps(payload).encode("utf-8"),
-          )
-
-          def call_with_retry(request, max_attempts=6):
+          def call_openai_with_retry(max_attempts=7):
               for attempt in range(1, max_attempts + 1):
                   try:
-                      with urllib.request.urlopen(request, timeout=60) as resp:
+                      req = urllib.request.Request(
+                          "https://api.openai.com/v1/chat/completions",
+                          headers={
+                              "Content-Type": "application/json",
+                              "Authorization": f"Bearer {api_key}",
+                          },
+                          data=json.dumps(payload).encode("utf-8"),
+                      )
+
+                      with urllib.request.urlopen(req, timeout=90) as resp:
                           return json.loads(resp.read().decode("utf-8"))
+
                   except HTTPError as e:
-                      if e.code in (429, 500, 502, 503, 504):
-                          wait = min(2 ** attempt, 60)
-                          print(f"HTTP {e.code}. Retry {attempt}/{max_attempts} in {wait}s...")
+                      if e.code == 429:
+                          retry_after = e.headers.get("Retry-After")
+                          if retry_after:
+                              wait = int(retry_after)
+                          else:
+                              wait = min((2 ** attempt) + random.uniform(0, 2), 60)
+
+                          print(f"429 Rate limit. Tentativa {attempt}/{max_attempts}. Esperando {wait}s...")
                           time.sleep(wait)
                           continue
+
+                      if e.code in (500, 502, 503, 504):
+                          wait = min((2 ** attempt) + random.uniform(0, 2), 60)
+                          print(f"HTTP {e.code}. Tentativa {attempt}/{max_attempts}. Esperando {wait}s...")
+                          time.sleep(wait)
+                          continue
+
                       raise
+
                   except URLError as e:
-                      wait = min(2 ** attempt, 60)
-                      print(f"Network error: {e}. Retry {attempt}/{max_attempts} in {wait}s...")
+                      wait = min((2 ** attempt) + random.uniform(0, 2), 60)
+                      print(f"Erro de rede: {e}. Tentativa {attempt}/{max_attempts}. Esperando {wait}s...")
                       time.sleep(wait)
                       continue
-              raise RuntimeError("OpenAI request failed after retries.")
 
-          data = call_with_retry(req)
+              raise RuntimeError("Falhou após múltiplas tentativas.")
+
+          data = call_openai_with_retry()
           review = data["choices"][0]["message"]["content"].strip()
 
-          body = "## 🤖 AI Code Review (Clean Code / SOLID / Clean Architecture / KISS / DRY / YAGNI)\n\n" + review
+          body = "## 🤖 AI Code Review\n\n" + review
           subprocess.run(["gh", "pr", "comment", pr_number, "--body", body], check=True)
           PY
+
