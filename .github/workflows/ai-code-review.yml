@@ -2,7 +2,7 @@ name: AI Code Review
 
 on:
   workflow_run:
-    workflows: ["CI"]
+    workflows: ["CI"]          # 👈 troque para o name do workflow que tem o sonar
     types: [completed]
 
 permissions:
@@ -11,42 +11,31 @@ permissions:
 
 jobs:
   ai_review:
+    # Só roda se o CI terminou com sucesso e se está habilitado
     if: >
       ${{
         github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'pull_request' &&
         vars.AI_REVIEW_ENABLED == 'true'
       }}
+
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}   # 👈 garante que pega o mesmo commit do CI
 
-      - name: Get PR number (workflow_run payload)
+      - name: Get PR number
         id: pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Fonte 1 (melhor): PRs associados ao workflow_run
-          PR_NUMBER="${{ github.event.workflow_run.pull_requests[0].number }}"
-          echo "PR_NUMBER(from payload)=$PR_NUMBER"
-
-          # Fallback: tenta via API do commit, se payload vier vazio
-          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
-            PR_NUMBER=$(gh api \
-              repos/${{ github.repository }}/commits/${{ github.event.workflow_run.head_sha }}/pulls \
-              -H "Accept: application/vnd.github+json" \
-              --jq '.[0].number // empty')
-            echo "PR_NUMBER(from commit pulls)=$PR_NUMBER"
-          fi
-
-          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
-            echo "Nenhum PR associado a este workflow_run. Encerrando sem comentar."
-            exit 0
-          fi
-
+          PR_NUMBER=$(gh api \
+            repos/${{ github.repository }}/commits/${{ github.event.workflow_run.head_sha }}/pulls \
+            -H "Accept: application/vnd.github+json" \
+            --jq '.[0].number')
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
 
       - name: Get PR diff
