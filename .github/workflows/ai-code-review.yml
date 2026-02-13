@@ -63,6 +63,7 @@ jobs:
 
       - name: AI review and comment
         if: ${{ steps.pr.outputs.pr_number != '' }}
+        continue-on-error: true
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -75,21 +76,20 @@ jobs:
           pr_number = os.environ["PR_NUMBER"]
           api_key = os.environ["OPENAI_API_KEY"]
 
+          # 🔥 Anti-burst delay
+          time.sleep(random.uniform(1, 4))
+
           with open("pr.diff", "r", encoding="utf-8", errors="ignore") as f:
               diff = f.read()
 
-          MAX_CHARS = 8000
+          MAX_CHARS = 4000
           if len(diff) > MAX_CHARS:
               diff = diff[:MAX_CHARS] + "\n\n[DIFF TRUNCADO]"
 
           prompt = f"""
-          Faça um code review objetivo em bullet points.
-          Aponte apenas:
-          - Bugs possíveis
-          - Problemas de design
-          - Problemas de segurança
-          - Sugestões diretas de melhoria
-
+          Faça um code review extremamente direto.
+          Liste apenas problemas críticos ou melhorias relevantes.
+          
           DIFF:
           {diff}
           """
@@ -97,41 +97,34 @@ jobs:
           payload = {
               "model": "gpt-4.1-mini",
               "messages": [
-                  {"role": "system", "content": "Você é um revisor técnico sênior, extremamente direto."},
+                  {"role": "system", "content": "Revisor técnico direto e pragmático."},
                   {"role": "user", "content": prompt},
               ],
               "temperature": 0.1,
-              "max_tokens": 500
+              "max_tokens": 300
           }
 
-          def call_openai(max_attempts=4):
-              for attempt in range(1, max_attempts + 1):
-                  try:
-                      req = urllib.request.Request(
-                          "https://api.openai.com/v1/chat/completions",
-                          headers={
-                              "Content-Type": "application/json",
-                              "Authorization": f"Bearer {api_key}",
-                          },
-                          data=json.dumps(payload).encode("utf-8"),
-                      )
+          try:
+              req = urllib.request.Request(
+                  "https://api.openai.com/v1/chat/completions",
+                  headers={
+                      "Content-Type": "application/json",
+                      "Authorization": f"Bearer {api_key}",
+                  },
+                  data=json.dumps(payload).encode("utf-8"),
+              )
 
-                      with urllib.request.urlopen(req, timeout=60) as resp:
-                          return json.loads(resp.read().decode("utf-8"))
+              with urllib.request.urlopen(req, timeout=60) as resp:
+                  data = json.loads(resp.read().decode("utf-8"))
 
-                  except HTTPError as e:
-                      if e.code == 429:
-                          wait = min((2 ** attempt) + random.uniform(0, 2), 30)
-                          print(f"429 Rate limit. Esperando {wait}s...")
-                          time.sleep(wait)
-                          continue
-                      raise
+              review = data["choices"][0]["message"]["content"].strip()
 
-              raise RuntimeError("OpenAI request failed after retries.")
+              body = "## 🤖 AI Code Review\n\n" + review
+              subprocess.run(["gh", "pr", "comment", pr_number, "--body", body], check=True)
 
-          data = call_openai()
-          review = data["choices"][0]["message"]["content"].strip()
-
-          body = "## 🤖 AI Code Review\n\n" + review
-          subprocess.run(["gh", "pr", "comment", pr_number, "--body", body], check=True)
+          except HTTPError as e:
+              if e.code == 429:
+                  print("Rate limit atingido. Pulando comentário desta vez.")
+              else:
+                  raise
           PY
