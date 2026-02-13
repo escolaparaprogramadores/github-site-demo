@@ -1,21 +1,15 @@
 name: AI Code Review
 
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
+  pull_request:
+    types: [opened, synchronize]
 
 permissions:
   contents: read
   pull-requests: write
 
-concurrency:
-  group: ai-review-${{ github.repository }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_sha }}
-  cancel-in-progress: true
-
 jobs:
   ai_review:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -29,76 +23,40 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.workflow_run.head_sha }}
-
-      - name: Get PR number
-        id: pr
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          PR_NUMBER="${{ github.event.workflow_run.pull_requests[0].number }}"
-          echo "PR_NUMBER(from payload)=$PR_NUMBER"
-
-          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
-            PR_NUMBER=$(gh api \
-              repos/${{ github.repository }}/commits/${{ github.event.workflow_run.head_sha }}/pulls \
-              -H "Accept: application/vnd.github+json" \
-              --jq '.[0].number // empty')
-            echo "PR_NUMBER(from commit pulls)=$PR_NUMBER"
-          fi
-
-          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
-            echo "Nenhum PR associado a este workflow_run/SHA. Encerrando sem comentar."
-            exit 0
-          fi
-
-          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
 
       - name: Get PR diff
-        if: ${{ steps.pr.outputs.pr_number != '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr diff ${{ steps.pr.outputs.pr_number }} > pr.diff
+          gh pr diff ${{ github.event.pull_request.number }} > pr.diff
 
       - name: AI review and comment
-        if: ${{ steps.pr.outputs.pr_number != '' }}
         continue-on-error: true
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           python3 - << 'PY'
-          import os, subprocess, json, urllib.request, time, random
+          import os, subprocess, json, urllib.request, time
           from urllib.error import HTTPError
 
           pr_number = os.environ["PR_NUMBER"]
           api_key = os.environ["OPENAI_API_KEY"]
 
-          # 🔥 Anti-burst delay
-          time.sleep(random.uniform(1, 4))
+          time.sleep(2)
 
           with open("pr.diff", "r", encoding="utf-8", errors="ignore") as f:
               diff = f.read()
 
-          MAX_CHARS = 4000
-          if len(diff) > MAX_CHARS:
-              diff = diff[:MAX_CHARS] + "\n\n[DIFF TRUNCADO]"
-
-          prompt = f"""
-          Faça um code review extremamente direto.
-          Liste apenas problemas críticos ou melhorias relevantes.
-          
-          DIFF:
-          {diff}
-          """
+          MAX_CHARS = 3000
+          diff = diff[:MAX_CHARS]
 
           payload = {
               "model": "gpt-4.1-mini",
               "messages": [
                   {"role": "system", "content": "Revisor técnico direto e pragmático."},
-                  {"role": "user", "content": prompt},
+                  {"role": "user", "content": f"Faça um code review objetivo:\n\n{diff}"}
               ],
               "temperature": 0.1,
               "max_tokens": 300
@@ -124,7 +82,7 @@ jobs:
 
           except HTTPError as e:
               if e.code == 429:
-                  print("Rate limit atingido. Pulando comentário desta vez.")
+                  print("Rate limit atingido. Pulando comentário.")
               else:
                   raise
           PY
