@@ -2,7 +2,7 @@ name: AI Code Review
 
 on:
   pull_request:
-    types: [labeled, synchronize, opened, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -15,6 +15,7 @@ concurrency:
 jobs:
   ai_review:
     runs-on: ubuntu-latest
+    timeout-minutes: 8
 
     steps:
       - name: Check AI_REVIEW_ENABLED
@@ -24,142 +25,312 @@ jobs:
             exit 0
           fi
 
-      # 🔥 Gate: só roda se PR for para main OU se tiver label ai-review
-      - name: Gate - run only when needed
-        id: gate
-        env:
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          LABEL_NAME: ${{ github.event.label.name }}
-        run: |
-          SHOULD_RUN="false"
-
-          # roda sempre se PR for para main
-          if [ "$BASE_REF" = "main" ]; then
-            SHOULD_RUN="true"
-          fi
-
-          # roda quando label ai-review for aplicada
-          if [ "$LABEL_NAME" = "ai-review" ]; then
-            SHOULD_RUN="true"
-          fi
-
-          echo "should_run=$SHOULD_RUN" >> $GITHUB_OUTPUT
-          echo "SHOULD_RUN=$SHOULD_RUN"
-
-      - name: Stop if not needed
-        if: ${{ steps.gate.outputs.should_run != 'true' }}
-        run: |
-          echo "Gate bloqueou execução (sem label ai-review e não é PR para main)."
-          exit 0
-
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # 🔥 Seleciona arquivos relevantes e pega um diff pequeno
-      - name: Build minimal diff
-        id: diff
+      - name: AI review (multi inline comments)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          set -e
-
-          # arquivos alterados (top 10)
-          gh pr diff "$PR" --name-only > files_all.txt
-
-          # filtra extensões úteis + remove lixo
-          grep -E '\.(js|ts|jsx|tsx|cs|py|java|go|rb|php|kt|swift|sql)$' files_all.txt \
-            | grep -vE '(^|/)(node_modules|dist|build|coverage|.next|out|vendor)/' \
-            | grep -vE '\.min\.' \
-            | head -n 10 > files.txt || true
-
-          if [ ! -s files.txt ]; then
-            echo "Nenhum arquivo relevante encontrado. Encerrando."
-            echo "has_diff=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          echo "Arquivos revisados:"
-          cat files.txt
-
-          # diff limitado (top 200 linhas)
-          gh pr diff "$PR" -- $(cat files.txt) | head -n 200 > pr.diff
-
-          echo "has_diff=true" >> $GITHUB_OUTPUT
-
-      - name: Stop if no diff
-        if: ${{ steps.diff.outputs.has_diff != 'true' }}
-        run: |
-          echo "Sem diff relevante."
-          exit 0
-
-      # 🔥 Cria/atualiza um único comentário
-      - name: AI review and upsert comment
-        continue-on-error: true
-        env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           python3 - << 'PY'
-          import os, json, urllib.request, subprocess
-          from urllib.error import HTTPError
+          import os, json, time, random, re
+          import urllib.request
+          from urllib.error import HTTPError, URLError
 
-          pr = os.environ["PR_NUMBER"]
-          api_key = os.environ["OPENAI_API_KEY"]
+          REPO = os.environ["REPO"]
+          PR_NUMBER = int(os.environ["PR_NUMBER"])
+          PR_SHA = os.environ["PR_SHA"]
+          GH_TOKEN = os.environ["GH_TOKEN"]
+          OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
-          with open("pr.diff", "r", encoding="utf-8", errors="ignore") as f:
-              diff = f.read()
+          GH_API = "https://api.github.com"
+          OAI_API = "https://api.openai.com/v1/chat/completions"
 
-          diff = diff[:2500]  # 🔥 agressivo
+          # --------------------------
+          # Helpers (retry + requests)
+          # --------------------------
+          def http_json(url, method="GET", headers=None, body=None, max_attempts=6):
+            if headers is None:
+              headers = {}
+            last_err = None
+            for attempt in range(1, max_attempts + 1):
+              try:
+                req = urllib.request.Request(url, method=method, headers=headers, data=body)
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                  data = resp.read().decode("utf-8")
+                  return json.loads(data) if data else None
+              except HTTPError as e:
+                last_err = e
+                # Retry on rate limit / transient
+                if e.code in (429, 500, 502, 503, 504):
+                  ra = e.headers.get("Retry-After")
+                  if ra:
+                    wait = min(int(ra), 60)
+                  else:
+                    wait = min((2 ** attempt) + random.uniform(0, 2), 60)
+                  print(f"HTTP {e.code} on {url}. Retry {attempt}/{max_attempts} in {wait:.1f}s")
+                  time.sleep(wait)
+                  continue
+                raise
+              except URLError as e:
+                last_err = e
+                wait = min((2 ** attempt) + random.uniform(0, 2), 60)
+                print(f"Network error on {url}: {e}. Retry {attempt}/{max_attempts} in {wait:.1f}s")
+                time.sleep(wait)
+                continue
+            raise RuntimeError(f"Request failed after retries: {last_err}")
 
-          prompt = (
-              "Faça um code review MUITO curto (máx 6 bullets). "
-              "Aponte apenas bugs/riscos e melhorias diretas. "
-              "Não invente contexto.\n\nDIFF:\n" + diff
-          )
+          def gh_headers():
+            return {
+              "Authorization": f"Bearer {GH_TOKEN}",
+              "Accept": "application/vnd.github+json",
+              "User-Agent": "ai-code-review-bot"
+            }
 
-          payload = {
+          def oai_headers():
+            return {
+              "Authorization": f"Bearer {OPENAI_API_KEY}",
+              "Content-Type": "application/json"
+            }
+
+          # ---------------------------------------------
+          # Parse changed RIGHT-side line numbers from patch
+          # Only lines that exist in the diff can be commented inline.
+          # ---------------------------------------------
+          HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+          def changed_right_lines_from_patch(patch: str):
+            changed = set()
+            if not patch:
+              return changed
+            right_line = None
+            for raw in patch.splitlines():
+              m = HUNK_RE.match(raw)
+              if m:
+                right_line = int(m.group(1))
+                continue
+              if right_line is None:
+                continue
+              # Context line
+              if raw.startswith(" "):
+                right_line += 1
+              # Added line (RIGHT)
+              elif raw.startswith("+") and not raw.startswith("+++"):
+                changed.add(right_line)
+                right_line += 1
+              # Removed line (LEFT) - does not advance right line
+              elif raw.startswith("-") and not raw.startswith("---"):
+                continue
+              else:
+                # Safety: treat unknown as advancing context
+                right_line += 1
+            return changed
+
+          # ---------------------------------------------
+          # 1) List PR files with patches (per-file diff)
+          # ---------------------------------------------
+          files = []
+          page = 1
+          while True:
+            url = f"{GH_API}/repos/{REPO}/pulls/{PR_NUMBER}/files?per_page=100&page={page}"
+            chunk = http_json(url, headers=gh_headers())
+            if not chunk:
+              break
+            files.extend(chunk)
+            if len(chunk) < 100:
+              break
+            page += 1
+
+          # Keep only files with text patch and not insanely large list
+          MAX_FILES = 12
+          selected = []
+          for f in files:
+            filename = f.get("filename")
+            patch = f.get("patch")
+            status = f.get("status")
+            if not filename or not patch:
+              continue
+            # Skip lockfiles/noise if you want:
+            # if filename.endswith("package-lock.json"):
+            #   continue
+            selected.append({"path": filename, "patch": patch, "status": status})
+            if len(selected) >= MAX_FILES:
+              break
+
+          if not selected:
+            print("No textual patches found. Nothing to review.")
+            exit(0)
+
+          # ---------------------------------------------
+          # 2) Ask model for inline comments per file (JSON)
+          #    We cap comments to avoid spam + cost.
+          # ---------------------------------------------
+          def call_openai(payload, max_attempts=6):
+            body = json.dumps(payload).encode("utf-8")
+            # Dedicated retry here too
+            last_err = None
+            for attempt in range(1, max_attempts + 1):
+              try:
+                req = urllib.request.Request(OAI_API, headers=oai_headers(), data=body)
+                with urllib.request.urlopen(req, timeout=90) as resp:
+                  return json.loads(resp.read().decode("utf-8"))
+              except HTTPError as e:
+                last_err = e
+                if e.code in (429, 500, 502, 503, 504):
+                  ra = e.headers.get("Retry-After")
+                  if ra:
+                    wait = min(int(ra), 60)
+                  else:
+                    wait = min((2 ** attempt) + random.uniform(0, 2), 60)
+                  print(f"OpenAI HTTP {e.code}. Retry {attempt}/{max_attempts} in {wait:.1f}s")
+                  time.sleep(wait)
+                  continue
+                raise
+              except URLError as e:
+                last_err = e
+                wait = min((2 ** attempt) + random.uniform(0, 2), 60)
+                print(f"OpenAI network error: {e}. Retry {attempt}/{max_attempts} in {wait:.1f}s")
+                time.sleep(wait)
+                continue
+            raise RuntimeError(f"OpenAI failed after retries: {last_err}")
+
+          # Build compact prompt per file to preserve context without huge diff truncation
+          # We ask for strict JSON to make automation stable.
+          per_file_comments = []
+          rate_limited = False
+
+          for item in selected:
+            path = item["path"]
+            patch = item["patch"]
+            eligible_lines = sorted(list(changed_right_lines_from_patch(patch)))
+
+            # If we can't compute eligible lines, skip (safety)
+            if not eligible_lines:
+              continue
+
+            # Limit prompt size per file to reduce tokens, but keep meaningful context
+            # (still better than global truncation)
+            PATCH_LIMIT = 8000
+            patch_for_prompt = patch[:PATCH_LIMIT]
+
+            prompt = f"""
+          Você é um revisor sênior (bem direto e pragmático).
+          Gere comentários INLINE apenas em linhas que aparecem no DIFF (lado RIGHT).
+          Não invente linhas fora do DIFF.
+          Objetivo: apontar bugs, riscos, segurança, design e melhorias concretas.
+
+          Responda SOMENTE em JSON válido no formato:
+          {{
+            "summary": "2-4 bullets curtos",
+            "comments": [
+              {{
+                "path": "{path}",
+                "line": 123,
+                "body": "comentário curto e acionável (1-3 bullets)"
+              }}
+            ]
+          }}
+
+          Regras:
+          - No máximo 3 comentários por arquivo.
+          - Use "line" como número de linha do arquivo no lado RIGHT do DIFF.
+          - Preferir linhas alteradas (adicionadas/modificadas) onde o comentário faz sentido.
+          - Seja específico e sugira correção quando possível.
+
+          DIFF do arquivo {path}:
+          {patch_for_prompt}
+          """
+
+            payload = {
               "model": "gpt-4o-mini",
-              "messages": [{"role": "user", "content": prompt}],
-              "temperature": 0,
-              "max_tokens": 180
+              "messages": [
+                {"role": "system", "content": "Você é um revisor de código extremamente criterioso e objetivo. Responda somente JSON."},
+                {"role": "user", "content": prompt}
+              ],
+              "temperature": 0.1,
+              "max_tokens": 450
+            }
+
+            try:
+              data = call_openai(payload, max_attempts=6)
+            except HTTPError as e:
+              if e.code == 429:
+                rate_limited = True
+                break
+              raise
+
+            content = data["choices"][0]["message"]["content"].strip()
+
+            # Parse JSON safely
+            try:
+              obj = json.loads(content)
+            except json.JSONDecodeError:
+              # Attempt to extract JSON block if model wrapped it
+              m = re.search(r"\{.*\}", content, re.DOTALL)
+              if not m:
+                continue
+              try:
+                obj = json.loads(m.group(0))
+              except Exception:
+                continue
+
+            comments = obj.get("comments", []) or []
+            # Validate & filter comments: path matches, line is eligible
+            file_comments = []
+            eligible_set = set(eligible_lines)
+
+            for c in comments[:3]:
+              cpath = c.get("path")
+              line = c.get("line")
+              body = c.get("body")
+              if cpath != path or not isinstance(line, int) or not body:
+                continue
+              if line not in eligible_set:
+                # map to nearest eligible line to avoid GitHub rejection
+                nearest = min(eligible_lines, key=lambda x: abs(x - line))
+                line = nearest
+              file_comments.append({
+                "path": path,
+                "line": line,
+                "side": "RIGHT",
+                "body": body.strip()[:900]  # GitHub comment size safety
+              })
+
+            if file_comments:
+              per_file_comments.extend(file_comments)
+
+          # Cap total inline comments (avoid spam)
+          per_file_comments = per_file_comments[:12]
+
+          # ---------------------------------------------
+          # 3) Create ONE review with multiple inline comments
+          # ---------------------------------------------
+          if rate_limited:
+            # Friendly PR comment explaining rate-limit (no fail)
+            msg = "## 🤖 AI Code Review\n\n⚠️ Rate limit (429) na OpenAI API neste momento. Tente novamente em alguns minutos."
+            url = f"{GH_API}/repos/{REPO}/issues/{PR_NUMBER}/comments"
+            http_json(url, method="POST", headers=gh_headers(), body=json.dumps({"body": msg}).encode("utf-8"))
+            print("Posted friendly rate limit message.")
+            exit(0)
+
+          if not per_file_comments:
+            msg = "## 🤖 AI Code Review\n\nSem comentários inline relevantes neste diff (ou diff sem patch textual). ✅"
+            url = f"{GH_API}/repos/{REPO}/issues/{PR_NUMBER}/comments"
+            http_json(url, method="POST", headers=gh_headers(), body=json.dumps({"body": msg}).encode("utf-8"))
+            print("Posted 'no comments' message.")
+            exit(0)
+
+          # Summary body (short)
+          summary = "## 🤖 AI Code Review\n\n- Comentários inline adicionados nos arquivos alterados.\n- Foco: bugs/riscos, segurança, design e melhorias diretas."
+
+          review_payload = {
+            "commit_id": PR_SHA,
+            "body": summary,
+            "event": "COMMENT",
+            "comments": per_file_comments
           }
 
-          try:
-              req = urllib.request.Request(
-                  "https://api.openai.com/v1/chat/completions",
-                  headers={
-                      "Content-Type": "application/json",
-                      "Authorization": f"Bearer {api_key}",
-                  },
-                  data=json.dumps(payload).encode("utf-8"),
-              )
-              with urllib.request.urlopen(req, timeout=30) as resp:
-                  data = json.loads(resp.read().decode("utf-8"))
-              review = data["choices"][0]["message"]["content"].strip()
-          except HTTPError as e:
-              if e.code == 429:
-                  review = "⚠️ Rate limit atingido (429). Tente novamente em 1-2 minutos."
-              else:
-                  raise
-
-          marker = "<!-- AI_REVIEW_COMMENT -->"
-          body = f"{marker}\n## 🤖 AI Code Review\n\n{review}"
-
-          # procura comentário existente com marker
-          existing = subprocess.run(
-              ["gh", "pr", "view", pr, "--json", "comments", "--jq",
-               f'.comments[] | select(.body | contains("{marker}")) | .id'],
-              capture_output=True, text=True
-          ).stdout.strip()
-
-          if existing:
-              subprocess.run(["gh", "api", f"repos/{{owner}}/{{repo}}/issues/comments/{existing}",
-                              "-X", "PATCH", "-f", f"body={body}"], check=True)
-              print("Comentário atualizado.")
-          else:
-              subprocess.run(["gh", "pr", "comment", pr, "--body", body], check=True)
-              print("Comentário criado.")
+          url = f"{GH_API}/repos/{REPO}/pulls/{PR_NUMBER}/reviews"
+          http_json(url, method="POST", headers=gh_headers(), body=json.dumps(review_payload).encode("utf-8"))
+          print(f"Created PR review with {len(per_file_comments)} inline comments.")
           PY
