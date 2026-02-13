@@ -7,6 +7,8 @@ on:
       - completed
     branches:
       - "develop"
+      - "feature/**"
+
 
 permissions:
   contents: read
