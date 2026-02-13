@@ -3,21 +3,21 @@ name: AI Code Review
 on:
   workflow_run:
     workflows: ["CI"]
-    types:
-      - completed
-   
-
+    types: [completed]
 
 permissions:
   contents: read
   pull-requests: write
 
+# Evita runs simultâneos do mesmo PR (ou mesmo SHA, se não tiver PR)
 concurrency:
-  group: ai-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+  group: ai-review-${{ github.repository }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_sha }}
   cancel-in-progress: true
 
 jobs:
   ai_review:
+    # Só roda se o CI terminou com sucesso
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
 
@@ -29,24 +29,62 @@ jobs:
             exit 0
           fi
 
+      - name: Resolve PR number
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 1) tenta direto do payload do workflow_run (melhor caso)
+          PR_NUMBER="${{ github.event.workflow_run.pull_requests[0].number }}"
+          echo "PR_NUMBER(from payload)=$PR_NUMBER"
+
+          # 2) fallback: busca PR pelo SHA
+          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
+            PR_NUMBER=$(gh api \
+              repos/${{ github.repository }}/commits/${{ github.event.workflow_run.head_sha }}/pulls \
+              -H "Accept: application/vnd.github+json" \
+              --jq '.[0].number // empty')
+            echo "PR_NUMBER(from commit pulls)=$PR_NUMBER"
+          fi
+
+          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
+            echo "Nenhum PR associado a este workflow_run/SHA. Encerrando."
+            exit 0
+          fi
+
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+      - uses: actions/checkout@v4
+        if: ${{ steps.pr.outputs.pr_number != '' }}
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
+
       - name: AI review (multi inline comments)
+        if: ${{ steps.pr.outputs.pr_number != '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          PR_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           python3 - << 'PY'
           import os, json, time, random, re
           import urllib.request
           from urllib.error import HTTPError, URLError
 
-          REPO = os.environ["REPO"]
-          PR_NUMBER = int(os.environ["PR_NUMBER"])
-          PR_SHA = os.environ["PR_SHA"]
-          GH_TOKEN = os.environ["GH_TOKEN"]
-          OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+          REPO = os.environ.get("REPO", "")
+          PR_NUMBER_RAW = os.environ.get("PR_NUMBER", "").strip()
+          PR_SHA = os.environ.get("PR_SHA", "").strip()
+          GH_TOKEN = os.environ.get("GH_TOKEN", "").strip()
+          OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
+
+          if not PR_NUMBER_RAW.isdigit():
+              print(f"PR_NUMBER inválido/vazio: '{PR_NUMBER_RAW}'. Encerrando sem review.")
+              raise SystemExit(0)
+
+          PR_NUMBER = int(PR_NUMBER_RAW)
 
           GH_API = "https://api.github.com"
           OAI_API = "https://api.openai.com/v1/chat/completions"
@@ -66,13 +104,9 @@ jobs:
                   return json.loads(data) if data else None
               except HTTPError as e:
                 last_err = e
-                # Retry on rate limit / transient
                 if e.code in (429, 500, 502, 503, 504):
                   ra = e.headers.get("Retry-After")
-                  if ra:
-                    wait = min(int(ra), 60)
-                  else:
-                    wait = min((2 ** attempt) + random.uniform(0, 2), 60)
+                  wait = min(int(ra), 60) if ra else min((2 ** attempt) + random.uniform(0, 2), 60)
                   print(f"HTTP {e.code} on {url}. Retry {attempt}/{max_attempts} in {wait:.1f}s")
                   time.sleep(wait)
                   continue
@@ -100,7 +134,6 @@ jobs:
 
           # ---------------------------------------------
           # Parse changed RIGHT-side line numbers from patch
-          # Only lines that exist in the diff can be commented inline.
           # ---------------------------------------------
           HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
           def changed_right_lines_from_patch(patch: str):
@@ -115,23 +148,19 @@ jobs:
                 continue
               if right_line is None:
                 continue
-              # Context line
               if raw.startswith(" "):
                 right_line += 1
-              # Added line (RIGHT)
               elif raw.startswith("+") and not raw.startswith("+++"):
                 changed.add(right_line)
                 right_line += 1
-              # Removed line (LEFT) - does not advance right line
               elif raw.startswith("-") and not raw.startswith("---"):
                 continue
               else:
-                # Safety: treat unknown as advancing context
                 right_line += 1
             return changed
 
           # ---------------------------------------------
-          # 1) List PR files with patches (per-file diff)
+          # 1) List PR files with patches
           # ---------------------------------------------
           files = []
           page = 1
@@ -145,7 +174,6 @@ jobs:
               break
             page += 1
 
-          # Keep only files with text patch and not insanely large list
           MAX_FILES = 12
           selected = []
           for f in files:
@@ -154,24 +182,19 @@ jobs:
             status = f.get("status")
             if not filename or not patch:
               continue
-            # Skip lockfiles/noise if you want:
-            # if filename.endswith("package-lock.json"):
-            #   continue
             selected.append({"path": filename, "patch": patch, "status": status})
             if len(selected) >= MAX_FILES:
               break
 
           if not selected:
             print("No textual patches found. Nothing to review.")
-            exit(0)
+            raise SystemExit(0)
 
           # ---------------------------------------------
           # 2) Ask model for inline comments per file (JSON)
-          #    We cap comments to avoid spam + cost.
           # ---------------------------------------------
           def call_openai(payload, max_attempts=6):
             body = json.dumps(payload).encode("utf-8")
-            # Dedicated retry here too
             last_err = None
             for attempt in range(1, max_attempts + 1):
               try:
@@ -182,10 +205,7 @@ jobs:
                 last_err = e
                 if e.code in (429, 500, 502, 503, 504):
                   ra = e.headers.get("Retry-After")
-                  if ra:
-                    wait = min(int(ra), 60)
-                  else:
-                    wait = min((2 ** attempt) + random.uniform(0, 2), 60)
+                  wait = min(int(ra), 60) if ra else min((2 ** attempt) + random.uniform(0, 2), 60)
                   print(f"OpenAI HTTP {e.code}. Retry {attempt}/{max_attempts} in {wait:.1f}s")
                   time.sleep(wait)
                   continue
@@ -198,8 +218,6 @@ jobs:
                 continue
             raise RuntimeError(f"OpenAI failed after retries: {last_err}")
 
-          # Build compact prompt per file to preserve context without huge diff truncation
-          # We ask for strict JSON to make automation stable.
           per_file_comments = []
           rate_limited = False
 
@@ -207,13 +225,9 @@ jobs:
             path = item["path"]
             patch = item["patch"]
             eligible_lines = sorted(list(changed_right_lines_from_patch(patch)))
-
-            # If we can't compute eligible lines, skip (safety)
             if not eligible_lines:
               continue
 
-            # Limit prompt size per file to reduce tokens, but keep meaningful context
-            # (still better than global truncation)
             PATCH_LIMIT = 8000
             patch_for_prompt = patch[:PATCH_LIMIT]
 
@@ -221,9 +235,8 @@ jobs:
           Você é um revisor sênior (bem direto e pragmático).
           Gere comentários INLINE apenas em linhas que aparecem no DIFF (lado RIGHT).
           Não invente linhas fora do DIFF.
-          Objetivo: apontar bugs, riscos, segurança, design e melhorias concretas.
 
-          Responda SOMENTE em JSON válido no formato:
+          Responda SOMENTE em JSON válido:
           {{
             "summary": "2-4 bullets curtos",
             "comments": [
@@ -237,9 +250,9 @@ jobs:
 
           Regras:
           - No máximo 3 comentários por arquivo.
-          - Use "line" como número de linha do arquivo no lado RIGHT do DIFF.
-          - Preferir linhas alteradas (adicionadas/modificadas) onde o comentário faz sentido.
-          - Seja específico e sugira correção quando possível.
+          - "line" é o número de linha RIGHT do DIFF.
+          - Preferir linhas alteradas.
+          - Seja específico e sugira correção.
 
           DIFF do arquivo {path}:
           {patch_for_prompt}
@@ -248,7 +261,7 @@ jobs:
             payload = {
               "model": "gpt-4o-mini",
               "messages": [
-                {"role": "system", "content": "Você é um revisor de código extremamente criterioso e objetivo. Responda somente JSON."},
+                {"role": "system", "content": "Você é um revisor técnico sênior. Responda somente JSON."},
                 {"role": "user", "content": prompt}
               ],
               "temperature": 0.1,
@@ -265,11 +278,9 @@ jobs:
 
             content = data["choices"][0]["message"]["content"].strip()
 
-            # Parse JSON safely
             try:
               obj = json.loads(content)
             except json.JSONDecodeError:
-              # Attempt to extract JSON block if model wrapped it
               m = re.search(r"\{.*\}", content, re.DOTALL)
               if not m:
                 continue
@@ -279,10 +290,9 @@ jobs:
                 continue
 
             comments = obj.get("comments", []) or []
-            # Validate & filter comments: path matches, line is eligible
-            file_comments = []
             eligible_set = set(eligible_lines)
 
+            file_comments = []
             for c in comments[:3]:
               cpath = c.get("path")
               line = c.get("line")
@@ -290,41 +300,36 @@ jobs:
               if cpath != path or not isinstance(line, int) or not body:
                 continue
               if line not in eligible_set:
-                # map to nearest eligible line to avoid GitHub rejection
                 nearest = min(eligible_lines, key=lambda x: abs(x - line))
                 line = nearest
               file_comments.append({
                 "path": path,
                 "line": line,
                 "side": "RIGHT",
-                "body": body.strip()[:900]  # GitHub comment size safety
+                "body": body.strip()[:900]
               })
 
-            if file_comments:
-              per_file_comments.extend(file_comments)
+            per_file_comments.extend(file_comments)
 
-          # Cap total inline comments (avoid spam)
           per_file_comments = per_file_comments[:12]
 
           # ---------------------------------------------
           # 3) Create ONE review with multiple inline comments
           # ---------------------------------------------
           if rate_limited:
-            # Friendly PR comment explaining rate-limit (no fail)
-            msg = "## 🤖 AI Code Review\n\n⚠️ Rate limit (429) na OpenAI API neste momento. Tente novamente em alguns minutos."
+            msg = "## 🤖 AI Code Review\n\n⚠️ Rate limit (429) na OpenAI API agora. Tente novamente em alguns minutos."
             url = f"{GH_API}/repos/{REPO}/issues/{PR_NUMBER}/comments"
             http_json(url, method="POST", headers=gh_headers(), body=json.dumps({"body": msg}).encode("utf-8"))
             print("Posted friendly rate limit message.")
-            exit(0)
+            raise SystemExit(0)
 
           if not per_file_comments:
             msg = "## 🤖 AI Code Review\n\nSem comentários inline relevantes neste diff (ou diff sem patch textual). ✅"
             url = f"{GH_API}/repos/{REPO}/issues/{PR_NUMBER}/comments"
             http_json(url, method="POST", headers=gh_headers(), body=json.dumps({"body": msg}).encode("utf-8"))
             print("Posted 'no comments' message.")
-            exit(0)
+            raise SystemExit(0)
 
-          # Summary body (short)
           summary = "## 🤖 AI Code Review\n\n- Comentários inline adicionados nos arquivos alterados.\n- Foco: bugs/riscos, segurança, design e melhorias diretas."
 
           review_payload = {
@@ -338,5 +343,3 @@ jobs:
           http_json(url, method="POST", headers=gh_headers(), body=json.dumps(review_payload).encode("utf-8"))
           print(f"Created PR review with {len(per_file_comments)} inline comments.")
           PY
-
-          
