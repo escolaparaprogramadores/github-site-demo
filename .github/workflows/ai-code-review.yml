@@ -233,6 +233,41 @@ jobs:
 
             prompt = f"""
           Você é um revisor sênior (bem direto e pragmático).
+            O arquivo a revisar é um diff/patch de PR, com linhas adicionadas (RIGHT side) e removidas (LEFT side).
+  
+            Foque em sugerir melhorias acionáveis nas linhas adicionadas (RIGHT), mas use o contexto do diff completo para entender o que mudou.
+  
+            Gere no máximo 3 comentários por arquivo, focando em:
+            - Bugs ou riscos evidentes
+            - Questões de segurança
+            - Problemas de design ou arquitetura
+            - Melhorias diretas no código
+            - Evite sugestões de estilo ou preferências subjetivas, a menos que sejam realmente evidentes.
+            - clean code, legibilidade e boas práticas são importantes, mas priorize questões que possam levar a bugs ou problemas de manutenção.
+            - Gere um titulo curto com o tipo de comentário (ex: "Bug","Clean Code", "Security", "Design", "Improvement") no início do comentário para facilitar a leitura.
+  
+            Evite comentários genéricos, subjetivos ou que não sejam diretamente acionáveis. Seja específico e sugira correção.
+  
+              Responda SOMENTE em JSON no formato abaixo, usando os números de linha do lado RIGHT do diff:
+  
+            {{
+              "summary": "2-4 bullets curtos resumindo os principais pontos",
+              "comments": [
+                {{
+                  "path": "{path}",
+                  "line": 123,
+                  "body": "comentário curto e acionável (1-3 bullets)"
+                }}
+              ]
+            }}
+  
+            Se o patch for muito grande, foque nas primeiras 8000 caracteres. Use o contexto para entender as mudanças, mas gere comentários apenas para as linhas adicionadas (RIGHT).
+  
+            DIFF do arquivo {path}:
+            {patch_for_prompt}
+            """
+  
+              print(f"Requesting review comments for {path} with eligible lines: {eligible_lines}")
           Gere comentários INLINE apenas em linhas que aparecem no DIFF (lado RIGHT).
           Não invente linhas fora do DIFF.
 
