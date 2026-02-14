@@ -13,6 +13,8 @@ on:
       - "develop"
       - "main"
       - "release/**"
+  path_ignore:
+    - "docs/**"
 
 jobs:
   run-tests:
