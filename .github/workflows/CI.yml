@@ -56,15 +56,15 @@ jobs:
   #           -Dsonar.projectName=keephouse
   #           -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
 
-  # deploy:
-  #   needs: [run-tests, sonar]
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@v4
+  deploy:
+    # needs: [run-tests, sonar]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-  #     - name: Build app
-  #       run: echo "Building app..."
+      - name: Build app
+        run: echo "Building app..."
 
-  #     - name: Deploy to develop
-  #       run: echo "Publicando em develop."
+      - name: Deploy to develop
+        run: echo "Publicando em develop."
