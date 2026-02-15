@@ -16,18 +16,13 @@ concurrency:
 jobs:
   open_pr:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Create PR if not exists (feature -> develop)
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}   # <<< AQUI
           REPO: ${{ github.repository }}
         run: |
+          set -e
           BRANCH="${GITHUB_REF_NAME}"
           BASE="develop"
 
