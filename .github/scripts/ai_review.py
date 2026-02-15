@@ -166,12 +166,15 @@ def process_file_review(path, patch, openai_key):
     comments = []
 
     for c in obj.get("comments", [])[:3]:
+        body = c.get("body") or c.get("description") or json.dumps(c, indent=2)
+
         comments.append({
             "path": path,
             "line": eligible_lines[0],
             "side": "RIGHT",
-            "body": c.get("body", "Sugestão automática")
+            "body": body
         })
+
 
     if not comments:
         comments.append({
