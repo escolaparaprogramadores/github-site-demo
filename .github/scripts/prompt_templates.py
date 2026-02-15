@@ -58,8 +58,8 @@ Regras obrigatórias:
 6. Não escreva textos genéricos.
 7. Seja objetivo e técnico.
 8. Responda SOMENTE JSON válido.
-9. Sempre que identificar uma melhoria técnica concreta,
-você DEVE incluir bloco ```suggestion``` com código corrigido completo:
+9. Sempre que identificar uma melhoria qualquer, mesmo que o código esteja correto, inclua um bloco ```suggestion``` com código corrigido completo:
+
 
 ```suggestion
 código corrigido aqui
