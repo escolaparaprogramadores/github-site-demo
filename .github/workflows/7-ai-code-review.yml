@@ -51,6 +51,6 @@ jobs:
           PR_SHA: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python .github/scripts/ai_review.py  
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python .github/scripts/ai_review.py
-            OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          run: python .github/scripts/ai_review.py
