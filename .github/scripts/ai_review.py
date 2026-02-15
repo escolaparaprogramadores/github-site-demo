@@ -146,7 +146,8 @@ def process_file_review(path, patch, openai_key):
     data = call_openai(prompt, openai_key)
 
     # novo formato responses API
-    output_text = data["output"][0]["content"][0]["text"]
+    output_text = data["output_text"]
+
 
     try:
         obj = json.loads(output_text)
