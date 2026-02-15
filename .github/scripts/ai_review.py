@@ -155,7 +155,6 @@ def process_file_review(path, patch, openai_key):
         return []
 
     prompt = build_review_prompt(path, patch)
-
     data = call_openai(prompt, openai_key)
 
     output_text = extract_text_from_response(data)
@@ -179,31 +178,50 @@ def process_file_review(path, patch, openai_key):
         if not isinstance(c, dict):
             continue
 
+        # linha sugerida pela IA
+        line = c.get("line")
+
+        # valida linha
+        if line not in eligible_lines:
+            line = eligible_lines[0]
+
         title = c.get("title", "Sugestão")
         comment = c.get("comment", "")
-        suggestion = c.get("suggestion", "")
+        suggestion = c.get("suggestion")
 
-        if suggestion and len(eligible_lines) == 1:
+        # habilita botão suggestion apenas se:
+        # - existir suggestion
+        # - for apenas 1 linha
+        if suggestion and "\n" not in suggestion.strip():
             body = f"""**{title}**
 
-        {comment}
+{comment}
 
-        ```suggestion
-        {suggestion}
-        ```"""
+```suggestion
+{suggestion}
+```"""
         else:
             body = f"""**{title}**
 
-        {comment}"""
+{comment}"""
 
         comments.append({
             "path": path,
-            "line": eligible_lines[0],
+            "line": line,
             "side": "RIGHT",
             "body": body
         })
 
+    if not comments:
+        comments.append({
+            "path": path,
+            "line": eligible_lines[0],
+            "side": "RIGHT",
+            "body": "🤖 AI Review executada com sucesso."
+        })
+
     return comments
+
 
 
 # ========================
