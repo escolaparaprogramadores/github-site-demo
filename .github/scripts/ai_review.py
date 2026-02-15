@@ -166,7 +166,25 @@ def process_file_review(path, patch, openai_key):
     comments = []
 
     for c in obj.get("comments", [])[:3]:
-        body = c.get("body") or c.get("description") or json.dumps(c, indent=2)
+        if not isinstance(c, dict):
+            continue
+
+        title = c.get("title", "Sugestão")
+        comment = c.get("comment", "")
+        suggestion = c.get("suggestion", "")
+
+        if suggestion:
+            body = f"""**{title}**
+
+    {comment}
+
+    ```suggestion
+    {suggestion}
+    ```"""
+        else:
+            body = f"""**{title}**
+
+    {comment}"""
 
         comments.append({
             "path": path,
