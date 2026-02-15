@@ -103,8 +103,10 @@ def call_openai(prompt, api_key):
     payload = {
         "model": "gpt-4.1-mini",
         "input": prompt,
-        "response_format": {
-            "type": "json_object"
+        "text": {
+            "format": {
+                "type": "json_object"
+            }
         }
     }
 
@@ -114,6 +116,7 @@ def call_openai(prompt, api_key):
         headers=oai_headers(api_key),
         body=json.dumps(payload).encode("utf-8")
     )
+
 
 
 
