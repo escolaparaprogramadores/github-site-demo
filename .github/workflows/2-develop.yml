@@ -84,8 +84,7 @@ jobs:
 
   deploy_develop:
     name: Deploy develop
-    needs: [test_build]
-    if: ${{ github.event_name != 'pull_request' }} # deploy só em push/manual
+    needs: [sonar]
     runs-on: ubuntu-latest
     steps:
       - name: Download build artifact
