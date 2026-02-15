@@ -2,8 +2,8 @@ name: 7 - AI Code Review
 
 on:
   pull_request:
-    branches:
-      - develop
+    branches: [develop]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -11,13 +11,13 @@ permissions:
   issues: write
 
 concurrency:
-  group: ai-review-${{ github.repository }}-${{ github.event.workflow_run.head_sha }}
+  group: ai-review-${{ github.repository }}-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   ai_review:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-      
+    # Não roda em draft
+    if: ${{ github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
