@@ -1,0 +1,32 @@
+name: 4 - Production
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Tag (ex: v1.0.3)"
+        required: true
+
+
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prod-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy_prod:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to production (placeholder)
+        run: |
+          echo "Deploy produção da versão: ${{ inputs.version || github.ref_name }}"
+          echo "Aqui você coloca S3/CloudFront/K8s/etc."
