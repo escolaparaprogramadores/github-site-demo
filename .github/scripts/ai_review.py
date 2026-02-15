@@ -196,7 +196,6 @@ def process_file_review(path, patch, openai_key):
 
         {comment}"""
 
-
         comments.append({
             "path": path,
             "line": eligible_lines[0],
