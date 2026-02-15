@@ -1,9 +1,9 @@
 name: 7 - AI Code Review
 
 on:
-  workflow_run:
-    workflows: ["2 - Develop"]
-    types: [completed]
+  pull_request:
+    branches:
+      - develop
 
 permissions:
   contents: read
