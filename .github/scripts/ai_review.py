@@ -102,7 +102,10 @@ def changed_right_lines_from_patch(patch):
 def call_openai(prompt, api_key):
     payload = {
         "model": "gpt-4.1-mini",
-        "input": prompt
+        "input": prompt,
+        "response_format": {
+            "type": "json_object"
+        }
     }
 
     return http_json(
@@ -111,6 +114,7 @@ def call_openai(prompt, api_key):
         headers=oai_headers(api_key),
         body=json.dumps(payload).encode("utf-8")
     )
+
 
 
 # ========================
