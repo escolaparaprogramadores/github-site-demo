@@ -1,11 +1,9 @@
-
 """
 Templates de prompts para AI Code Review.
 
 Este módulo centraliza todos os templates de prompts utilizados
 para comunicação com OpenAI, facilitando manutenção e auditoria.
 """
-
 
 # ============================================================
 # FEATURE FLAGS - Plataforma de Engenharia Assistida
@@ -14,15 +12,10 @@ para comunicação com OpenAI, facilitando manutenção e auditoria.
 AI_FEATURE_FLAGS = {
     "REVIEW_ENABLED": True,
     "SUGGESTIONS_ENABLED": True,
+    "FORCE_GITHUB_SUGGESTION_BUTTON": False, 
     "REFACTOR_MODE": True,
     "LINT_MODE": False,
     "ARCHITECTURE_ANALYSIS": True,
-if force_button:
-    suggestion_field = ', "suggestion": "Código obrigatório substituindo a linha analisada"'
-    suggestion_rules = "4. O campo \"suggestion\" é OBRIGATÓRIO.\n5. Sempre gere código substituindo exatamente a linha analisada."
-else:
-    suggestion_field = ', "suggestion": "codigo opcional em uma única linha quando possível"'
-    suggestion_rules = "4. O campo \"suggestion\" é opcional.\n5. Se existir suggestion, deve ser apenas o código puro."
     "MAX_COMMENTS_PER_FILE": 3
 }
 
@@ -68,8 +61,8 @@ Regras obrigatórias:
   ]
 }}
 
-4. O campo "suggestion" é opcional.
-5. Se existir suggestion, deve ser apenas o código puro (SEM markdown, SEM crases, SEM ```).
+{suggestion_rules}
+
 6. Nunca inclua texto fora do JSON.
 7. Nunca inclua explicações fora da estrutura JSON.
 8. Nunca use blocos ```suggestion``` — apenas forneça o código puro no campo suggestion.
@@ -87,15 +80,15 @@ def build_review_prompt(file_path, patch_content, max_patch_size=8000):
     if force_button:
         suggestion_field = ', "suggestion": "Código obrigatório substituindo a linha analisada"'
         suggestion_rules = """
-        4. O campo "suggestion" é OBRIGATÓRIO.
-        5. Sempre gere código substituindo exatamente a linha analisada.
-        """
+4. O campo "suggestion" é OBRIGATÓRIO.
+5. Sempre gere código substituindo exatamente a linha analisada.
+"""
     else:
         suggestion_field = ', "suggestion": "codigo opcional em uma única linha quando possível"'
         suggestion_rules = """
-        4. O campo "suggestion" é opcional.
-        5. Se existir suggestion, deve ser apenas o código puro.
-        """
+4. O campo "suggestion" é opcional.
+5. Se existir suggestion, deve ser apenas o código puro.
+"""
 
     return REVIEW_PROMPT_TEMPLATE.format(
         path=file_path,
@@ -104,4 +97,3 @@ def build_review_prompt(file_path, patch_content, max_patch_size=8000):
         suggestion_field=suggestion_field,
         suggestion_rules=suggestion_rules
     )
-
