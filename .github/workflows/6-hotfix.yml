@@ -35,3 +35,4 @@ jobs:
             --base "$BASE" \
             --title "Hotfix $BRANCH -> $BASE" \
             --body "PR automática criada a partir de push em $BRANCH."
+
