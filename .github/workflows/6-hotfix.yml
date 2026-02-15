@@ -1,4 +1,4 @@
-name: PR hotfix -> main
+name: 6 - Hotfix
 
 on:
   push:
@@ -9,17 +9,22 @@ permissions:
   contents: read
   pull-requests: write
 
+concurrency:
+  group: hotfix-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   open_pr:
     runs-on: ubuntu-latest
     steps:
-      - name: Create PR if not exists
+      - name: Create PR if not exists (hotfix -> main)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BRANCH="${GITHUB_REF_NAME}"
-          EXISTING=$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number' || true)
+          BASE="main"
 
+          EXISTING=$(gh pr list --head "$BRANCH" --base "$BASE" --state open --json number --jq '.[0].number' || true)
           if [ -n "$EXISTING" ]; then
             echo "PR already exists: #$EXISTING"
             exit 0
@@ -27,6 +32,7 @@ jobs:
 
           gh pr create \
             --head "$BRANCH" \
-            --base main \
-            --title "Hotfix $BRANCH -> main" \
+            --base "$BASE" \
+            --title "Hotfix $BRANCH -> $BASE" \
             --body "PR automática criada a partir de push em $BRANCH."
+
