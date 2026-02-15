@@ -14,6 +14,7 @@ from logger import (
     operation_start, operation_success, operation_failed, operation_skipped
 )
 
+
 GH_API = "https://api.github.com"
 OAI_API = "https://api.openai.com/v1/chat/completions"
 
@@ -21,6 +22,7 @@ OAI_API = "https://api.openai.com/v1/chat/completions"
 # =============================
 # ENVIRONMENT VALIDATION
 # =============================
+
 
 def _validate_environment():
     operation_start("Validação de ambiente")
@@ -172,6 +174,7 @@ def call_openai(payload, api_key, max_attempts=6):
 # REVIEW ENGINE
 # =============================
 
+
 def process_file_review(repo, token, pr_sha, pr_number, openai_key, path, patch):
     if not AI_FEATURE_FLAGS["REVIEW_ENABLED"]:
         operation_skipped(path, "Review desabilitado por flag")
@@ -194,6 +197,7 @@ def process_file_review(repo, token, pr_sha, pr_number, openai_key, path, patch)
         "max_tokens": 900
     }
 
+    
     try:
         data = call_openai(payload, openai_key)
     except Exception:
@@ -258,6 +262,7 @@ def process_file_review(repo, token, pr_sha, pr_number, openai_key, path, patch)
     return file_comments
 
 
+
 def fetch_pr_files(repo, token, pr_number):
     files = []
     page = 1
@@ -286,6 +291,7 @@ def fetch_pr_files(repo, token, pr_number):
     return selected
 
 
+
 def publish_review(repo, token, pr_sha, pr_number, comments):
     if not comments:
         operation_skipped("Publicação", "Nenhum comentário")
@@ -308,6 +314,8 @@ def publish_review(repo, token, pr_sha, pr_number, comments):
 # MAIN
 # =============================
 
+
+
 def main():
     info("=" * 60)
     info("Iniciando AI Engineering Platform")
@@ -323,6 +331,7 @@ def main():
 
     all_comments = []
 
+    
     for item in files[:12]:
         comments = process_file_review(
             repo,
