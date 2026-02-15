@@ -191,7 +191,7 @@ def process_file_review(repo, token, pr_sha, pr_number, openai_key, path, patch)
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.1,
-        "max_tokens": 500
+        "max_tokens": 900
     }
 
     try:
@@ -231,11 +231,28 @@ def process_file_review(repo, token, pr_sha, pr_number, openai_key, path, patch)
         if line not in eligible_set:
             line = min(eligible_lines, key=lambda x: abs(x - line))
 
+        clean_body = body.strip()
+
+        # 🔥 GARANTIR BLOCO suggestion FUNCIONAL
+        if "```suggestion" in clean_body:
+            if not clean_body.strip().endswith("```"):
+                clean_body = clean_body.rstrip() + "\n```"
+
+            parts = clean_body.split("```suggestion")
+            if len(parts) == 2:
+                before = parts[0].strip()
+                suggestion_block = "```suggestion" + parts[1].strip()
+
+                if before:
+                    clean_body = before + "\n\n" + suggestion_block
+                else:
+                    clean_body = suggestion_block
+
         file_comments.append({
             "path": path,
             "line": line,
             "side": "RIGHT",
-            "body": body[:1000]
+            "body": clean_body
         })
 
     return file_comments

@@ -63,21 +63,7 @@ Regras obrigatórias:
 ```suggestion
 código corrigido aqui
 ```
-10. Se não houver nada a comentar, responda com um JSON vazio: {{}}
-11. Não comente sobre estilo de código a menos que seja algo que impacte legibilidade ou manutenibilidade.
-12. Foque em aspectos que realmente impactam a qualidade, segurança, performance ou manutenibilidade do código.
-13. Evite comentários subjetivos ou baseados em preferências pessoais.
-14. Se o código parecer confuso ou complexo, destaque isso como um problema de legibilidade ou complexidade, não como uma questão de estilo.
-15. Se o código tiver problemas de segurança, destaque isso claramente.
-16. Se o código tiver problemas de performance, destaque isso claramente.
-17. Se o código violar princípios de design ou arquitetura, destaque isso claramente.
-18. Se o código tiver problemas de testabilidade, destaque isso claramente.     
-19. Se o código tiver problemas de produtividade (ex: código muito verboso, repetitivo), destaque isso claramente.
-20. Se o código tiver problemas de acoplamento ou coesão, destaque isso claramente. 
-21. Se o código tiver problemas de legibilidade, destaque isso claramente.
-22. Se o código tiver problemas de manutenibilidade, destaque isso claramente.
-23. Se o código tiver problemas de complexidade, destaque isso claramente.
-24. Se o código tiver problemas de design ou arquitetura, destaque isso claramente.
+
 
 DIFF do arquivo {path}:
 {patch}"""
