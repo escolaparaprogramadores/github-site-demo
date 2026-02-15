@@ -1,5 +1,3 @@
-
-
 # Standard library imports
 import json
 import os
@@ -16,7 +14,6 @@ from logger import (
     operation_start, operation_success, operation_failed, operation_skipped
 )
 
-
 GH_API = "https://api.github.com"
 OAI_API = "https://api.openai.com/v1/chat/completions"
 
@@ -24,7 +21,6 @@ OAI_API = "https://api.openai.com/v1/chat/completions"
 # =============================
 # ENVIRONMENT VALIDATION
 # =============================
-
 
 def _validate_environment():
     operation_start("Validação de ambiente")
@@ -176,7 +172,6 @@ def call_openai(payload, api_key, max_attempts=6):
 # REVIEW ENGINE
 # =============================
 
-
 def process_file_review(repo, token, pr_sha, pr_number, openai_key, path, patch):
     if not AI_FEATURE_FLAGS["REVIEW_ENABLED"]:
         operation_skipped(path, "Review desabilitado por flag")
@@ -199,7 +194,6 @@ def process_file_review(repo, token, pr_sha, pr_number, openai_key, path, patch)
         "max_tokens": 900
     }
 
-    
     try:
         data = call_openai(payload, openai_key)
     except Exception:
@@ -217,11 +211,17 @@ def process_file_review(repo, token, pr_sha, pr_number, openai_key, path, patch)
     if not content:
         return []
 
+    # 🔥 PARSER RESILIENTE
     try:
         obj = json.loads(content)
     except Exception:
-        warning(f"Falha ao parsear JSON para {path}")
-        return []
+        try:
+            start = content.index("{")
+            end = content.rindex("}") + 1
+            obj = json.loads(content[start:end])
+        except Exception:
+            warning(f"Falha ao parsear JSON para {path}")
+            return []
 
     comments = obj.get("comments", []) or []
     eligible_set = set(eligible_lines)
@@ -239,20 +239,10 @@ def process_file_review(repo, token, pr_sha, pr_number, openai_key, path, patch)
 
         clean_body = body.strip()
 
-        # 🔥 GARANTIR BLOCO suggestion FUNCIONAL
+        # 🔥 Garantia absoluta de suggestion funcional
         if "```suggestion" in clean_body:
-            if not clean_body.strip().endswith("```"):
+            if not clean_body.endswith("```"):
                 clean_body = clean_body.rstrip() + "\n```"
-
-            parts = clean_body.split("```suggestion")
-            if len(parts) == 2:
-                before = parts[0].strip()
-                suggestion_block = "```suggestion" + parts[1].strip()
-
-                if before:
-                    clean_body = before + "\n\n" + suggestion_block
-                else:
-                    clean_body = suggestion_block
 
         file_comments.append({
             "path": path,
@@ -262,7 +252,6 @@ def process_file_review(repo, token, pr_sha, pr_number, openai_key, path, patch)
         })
 
     return file_comments
-
 
 
 def fetch_pr_files(repo, token, pr_number):
@@ -293,7 +282,6 @@ def fetch_pr_files(repo, token, pr_number):
     return selected
 
 
-
 def publish_review(repo, token, pr_sha, pr_number, comments):
     if not comments:
         operation_skipped("Publicação", "Nenhum comentário")
@@ -307,16 +295,17 @@ def publish_review(repo, token, pr_sha, pr_number, comments):
     }
 
     url = f"{GH_API}/repos/{repo}/pulls/{pr_number}/reviews"
-    http_json(url, method="POST",
-              headers=gh_headers(token),
-              body=json.dumps(review_payload).encode("utf-8"))
+    http_json(
+        url,
+        method="POST",
+        headers=gh_headers(token),
+        body=json.dumps(review_payload).encode("utf-8")
+    )
 
 
 # =============================
 # MAIN
 # =============================
-
-
 
 def main():
     info("=" * 60)
@@ -333,7 +322,6 @@ def main():
 
     all_comments = []
 
-    
     for item in files[:12]:
         comments = process_file_review(
             repo,
