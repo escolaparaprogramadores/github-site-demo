@@ -1,5 +1,5 @@
 # ============================================================
-# AI ENGINEERING PLATFORM - STABLE VERSION
+# AI ENGINEERING PLATFORM - STABLE VERSION (FIXED)
 # ============================================================
 
 import json
@@ -99,6 +99,18 @@ def changed_right_lines_from_patch(patch):
 # OPENAI
 # ========================
 
+def extract_text_from_response(data):
+    """
+    Extrai texto de forma segura da Responses API
+    """
+    try:
+        return data["output"][0]["content"][0]["text"]
+    except Exception:
+        print("Resposta inesperada da OpenAI:")
+        print(json.dumps(data, indent=2))
+        return None
+
+
 def call_openai(prompt, api_key):
     payload = {
         "model": "gpt-4.1-mini",
@@ -116,8 +128,6 @@ def call_openai(prompt, api_key):
         headers=oai_headers(api_key),
         body=json.dumps(payload).encode("utf-8")
     )
-
-
 
 
 # ========================
@@ -148,10 +158,10 @@ def process_file_review(path, patch, openai_key):
 
     data = call_openai(prompt, openai_key)
 
-    # novo formato responses API
-    output_text = data["output"][0]["content"][0]["text"]
+    output_text = extract_text_from_response(data)
 
-
+    if not output_text:
+        return []
 
     try:
         obj = json.loads(output_text)
@@ -174,32 +184,25 @@ def process_file_review(path, patch, openai_key):
         suggestion = c.get("suggestion", "")
 
         if suggestion:
-            body = f"""**{title}**
+            # IMPORTANTÍSSIMO:
+            # SEM INDENTAÇÃO antes de ```suggestion
+            body = f"""### {title}
 
-    {comment}
+{comment}
 
-    ```suggestion
-    {suggestion}
-    ```"""
+```suggestion
+{suggestion}
+```"""
         else:
-            body = f"""**{title}**
+            body = f"""### {title}
 
-    {comment}"""
+{comment}"""
 
         comments.append({
             "path": path,
             "line": eligible_lines[0],
             "side": "RIGHT",
             "body": body
-        })
-
-
-    if not comments:
-        comments.append({
-            "path": path,
-            "line": eligible_lines[0],
-            "side": "RIGHT",
-            "body": "🤖 AI Review executada com sucesso."
         })
 
     return comments
@@ -210,21 +213,26 @@ def process_file_review(path, patch, openai_key):
 # ========================
 
 def publish_review(repo, token, pr_sha, pr_number, comments):
-    review_payload = {
-        "commit_id": pr_sha,
-        "event": "COMMENT",
-        "body": "## 🤖 AI Engineering Review",
-        "comments": comments
-    }
+    if not comments:
+        return
 
-    url = f"{GH_API}/repos/{repo}/pulls/{pr_number}/reviews"
+    for c in comments:
+        url = f"{GH_API}/repos/{repo}/pulls/{pr_number}/comments"
 
-    http_json(
-        url,
-        method="POST",
-        headers=gh_headers(token),
-        body=json.dumps(review_payload).encode("utf-8")
-    )
+        payload = {
+            "body": c["body"],
+            "commit_id": pr_sha,
+            "path": c["path"],
+            "side": "RIGHT",
+            "line": c["line"]
+        }
+
+        http_json(
+            url,
+            method="POST",
+            headers=gh_headers(token),
+            body=json.dumps(payload).encode("utf-8")
+        )
 
 
 # ========================
