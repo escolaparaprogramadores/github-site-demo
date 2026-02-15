@@ -2,9 +2,7 @@ name: Security - CodeQL SAST Scan
 
 on:
   pull_request:
-    branches: ["develop", "main", "release/**"]
-  push:
-    branches: ["develop", "main"]
+    branches: ["develop"]
   schedule:
     - cron: "0 6 * * 1"
 
