@@ -38,6 +38,16 @@ jobs:
             exit 0
           fi
 
+      - name: Stop if develop has no commits ahead of main
+        run: |
+          git fetch origin main develop --quiet
+          DIFF_COUNT=$(git rev-list --count origin/main..origin/develop)
+          echo "Commits in develop not in main: $DIFF_COUNT"
+          if [ "$DIFF_COUNT" -eq 0 ]; then
+            echo "Nada novo para release (develop == main)."
+            exit 0
+          fi
+
       - name: Compute next SemVer tag (patch)
         id: semver
         run: |
@@ -52,11 +62,13 @@ jobs:
             NEXT_TAG="v${MAJOR}.${MINOR}.${PATCH}"
           fi
 
+          echo "last_tag=$LAST_TAG" >> "$GITHUB_OUTPUT"
+          echo "next_tag=$NEXT_TAG" >> "$GITHUB_OUTPUT"
           echo "LAST_TAG=$LAST_TAG"
           echo "NEXT_TAG=$NEXT_TAG"
-          echo "next_tag=$NEXT_TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Create release branch from develop and push
+      - name: Create release branch from develop and push (if not exists)
+        id: branch
         run: |
           VERSION="${{ steps.semver.outputs.next_tag }}"
           RELEASE_BRANCH="release/${VERSION}"
@@ -64,44 +76,45 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Se a branch já existe, não tenta recriar
           if git ls-remote --heads origin "$RELEASE_BRANCH" | grep -q "$RELEASE_BRANCH"; then
             echo "Release branch already exists: $RELEASE_BRANCH"
-            exit 0
+          else
+            git checkout -b "$RELEASE_BRANCH"
+            git push -u origin "$RELEASE_BRANCH"
           fi
 
-          git checkout -b "$RELEASE_BRANCH"
-          git push -u origin "$RELEASE_BRANCH"
+          echo "release_branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create PR release -> main (only if there are changes)
+      - name: Create tag (if not exists) and push
+        run: |
+          VERSION="${{ steps.semver.outputs.next_tag }}"
+
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "Tag already exists locally: $VERSION"
+          else
+            git tag "$VERSION"
+          fi
+
+          # garante que a tag existe no remoto
+          if git ls-remote --tags origin | grep -q "refs/tags/$VERSION"; then
+            echo "Tag already exists on origin: $VERSION"
+          else
+            git push origin "$VERSION"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create PR release -> main (only if not exists)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ steps.semver.outputs.next_tag }}"
-          RELEASE_BRANCH="release/${VERSION}"
+          RELEASE_BRANCH="${{ steps.branch.outputs.release_branch }}"
           BASE="main"
 
-          echo "Checking diff between $BASE and $RELEASE_BRANCH..."
-
-          git fetch origin "$BASE" "$RELEASE_BRANCH" --quiet
-
-          DIFF_COUNT=$(git rev-list --count "origin/$BASE..origin/$RELEASE_BRANCH")
-          echo "Commits ahead of $BASE: $DIFF_COUNT"
-
-          if [ "$DIFF_COUNT" -eq 0 ]; then
-            echo "Sem commits novos entre $BASE e $RELEASE_BRANCH. Não vou criar PR."
-            exit 0
-          fi
-
-          EXISTING=$(gh pr list \
-            --head "$RELEASE_BRANCH" \
-            --base "$BASE" \
-            --state open \
-            --json number \
-            --jq '.[0].number' || true)
-
+          EXISTING=$(gh pr list --head "$RELEASE_BRANCH" --base "$BASE" --state open --json number --jq '.[0].number' || true)
           if [ -n "$EXISTING" ]; then
             echo "PR already exists: #$EXISTING"
             exit 0
