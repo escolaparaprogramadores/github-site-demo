@@ -57,34 +57,34 @@ jobs:
           name: build-site
           path: dist/
 
-  sonar:
-    name: SonarQube Scan
-    needs: [test_build]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+  # sonar:
+  #   name: SonarQube Scan
+  #   needs: [test_build]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
 
-      - name: Download coverage artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: coverage
-          path: coverage
+  #     - name: Download coverage artifact
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: coverage
+  #         path: coverage
 
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v6
-        env:
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        with:
-          args: >
-            -Dsonar.projectKey=keephouse
-            -Dsonar.projectName=keephouse
-            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+  #     - name: SonarQube Scan
+  #       uses: SonarSource/sonarqube-scan-action@v6
+  #       env:
+  #         SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+  #         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  #       with:
+  #         args: >
+  #           -Dsonar.projectKey=keephouse
+  #           -Dsonar.projectName=keephouse
+  #           -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
 
   deploy_develop:
     name: Deploy develop
-    needs: [test_build, sonar]
+    needs: [test_build]
     if: ${{ github.event_name != 'pull_request' }} # deploy só em push/manual
     runs-on: ubuntu-latest
     steps:
