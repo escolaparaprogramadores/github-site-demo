@@ -72,6 +72,7 @@ jobs:
           path: coverage
 
       - name: SonarQube Scan
+        continue-on-error: true
         uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}

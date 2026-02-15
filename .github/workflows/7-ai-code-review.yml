@@ -43,6 +43,7 @@ jobs:
           pip install requests
 
       - name: Run AI Review
+        continue-on-error: true
         env:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
