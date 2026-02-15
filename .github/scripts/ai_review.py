@@ -1,30 +1,21 @@
 # ============================================================
-# AI ENGINEERING PLATFORM - ENTERPRISE VERSION (FIXED)
+# AI ENGINEERING PLATFORM - STABLE VERSION
 # ============================================================
 
 import json
 import os
-import random
 import re
-import time
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-# ========================
-# CONFIG
-# ========================
+from prompt_templates import build_review_prompt
 
 GH_API = "https://api.github.com"
-OAI_API = "https://api.openai.com/v1/chat/completions"
+OAI_API = "https://api.openai.com/v1/responses"
 
-AI_FEATURE_FLAGS = {
-    "REVIEW_ENABLED": True,
-    "SUGGESTIONS_ENABLED": True,
-    "MAX_COMMENTS_PER_FILE": 3
-}
 
 # ========================
-# ENV VALIDATION
+# ENV
 # ========================
 
 def _validate_environment():
@@ -41,14 +32,20 @@ def _validate_environment():
 
 
 # ========================
-# HTTP UTIL
+# HTTP
 # ========================
 
 def http_json(url, method="GET", headers=None, body=None):
     req = Request(url, method=method, headers=headers or {}, data=body)
-    with urlopen(req, timeout=60) as resp:
-        data = resp.read().decode("utf-8")
-        return json.loads(data) if data else None
+
+    try:
+        with urlopen(req, timeout=60) as resp:
+            data = resp.read().decode("utf-8")
+            return json.loads(data) if data else None
+    except HTTPError as e:
+        print("HTTP ERROR:", e.code)
+        print(e.read().decode())
+        raise
 
 
 def gh_headers(token):
@@ -95,21 +92,17 @@ def changed_right_lines_from_patch(patch):
         else:
             right_line += 1
 
-    return changed
+    return sorted(list(changed))
 
 
 # ========================
-# OPENAI CALL
+# OPENAI
 # ========================
 
 def call_openai(prompt, api_key):
     payload = {
-        "model": "gpt-4o-mini",
-        "messages": [
-            {"role": "system", "content": "Responda somente JSON válido."},
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.1
+        "model": "gpt-4.1-mini",
+        "input": prompt
     }
 
     return http_json(
@@ -121,43 +114,45 @@ def call_openai(prompt, api_key):
 
 
 # ========================
-# FILE FETCH
+# FETCH FILES
 # ========================
 
 def fetch_pr_files(repo, token, pr_number):
     url = f"{GH_API}/repos/{repo}/pulls/{pr_number}/files"
     files = http_json(url, headers=gh_headers(token)) or []
 
-    selected = []
-    for f in files:
-        if f.get("patch"):
-            selected.append({
-                "path": f["filename"],
-                "patch": f["patch"]
-            })
-
-    return selected
+    return [
+        {"path": f["filename"], "patch": f["patch"]}
+        for f in files
+        if f.get("patch")
+    ]
 
 
 # ========================
-# REVIEW PROCESS
+# REVIEW
 # ========================
 
 def process_file_review(path, patch, openai_key):
-    eligible_lines = sorted(list(changed_right_lines_from_patch(patch)))
+    eligible_lines = changed_right_lines_from_patch(patch)
     if not eligible_lines:
         return []
 
-    prompt = f"Revise o seguinte diff:\n{patch}"
+    prompt = build_review_prompt(path, patch)
 
     data = call_openai(prompt, openai_key)
 
-    content = data["choices"][0]["message"]["content"]
+    # novo formato responses API
+    output_text = data["output"][0]["content"][0]["text"]
 
     try:
-        obj = json.loads(content)
+        obj = json.loads(output_text)
     except Exception:
-        return []
+        return [{
+            "path": path,
+            "line": eligible_lines[0],
+            "side": "RIGHT",
+            "body": "⚠️ AI Review executada, mas resposta não foi JSON válido."
+        }]
 
     comments = []
 
@@ -169,20 +164,26 @@ def process_file_review(path, patch, openai_key):
             "body": c.get("body", "Sugestão automática")
         })
 
+    if not comments:
+        comments.append({
+            "path": path,
+            "line": eligible_lines[0],
+            "side": "RIGHT",
+            "body": "🤖 AI Review executada com sucesso."
+        })
+
     return comments
 
 
 # ========================
-# PUBLISH REVIEW
+# PUBLISH
 # ========================
 
 def publish_review(repo, token, pr_sha, pr_number, comments):
-    if not comments:
-        return
-
     review_payload = {
         "commit_id": pr_sha,
         "event": "COMMENT",
+        "body": "## 🤖 AI Engineering Review",
         "comments": comments
     }
 
@@ -207,7 +208,7 @@ def main():
 
     all_comments = []
 
-    for f in files:
+    for f in files[:10]:
         comments = process_file_review(
             f["path"],
             f["patch"],
