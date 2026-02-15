@@ -183,20 +183,19 @@ def process_file_review(path, patch, openai_key):
         comment = c.get("comment", "")
         suggestion = c.get("suggestion", "")
 
-        if suggestion:
-            # IMPORTANTÍSSIMO:
-            # SEM INDENTAÇÃO antes de ```suggestion
-            body = f"""### {title}
+        if suggestion and len(eligible_lines) == 1:
+            body = f"""**{title}**
 
-{comment}
+        {comment}
 
-```suggestion
-{suggestion}
-```"""
+        ```suggestion
+        {suggestion}
+        ```"""
         else:
-            body = f"""### {title}
+            body = f"""**{title}**
 
-{comment}"""
+        {comment}"""
+
 
         comments.append({
             "path": path,
