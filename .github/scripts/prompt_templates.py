@@ -17,7 +17,12 @@ AI_FEATURE_FLAGS = {
     "REFACTOR_MODE": True,
     "LINT_MODE": False,
     "ARCHITECTURE_ANALYSIS": True,
-    "FORCE_GITHUB_SUGGESTION_BUTTON": True,
+if force_button:
+    suggestion_field = ', "suggestion": "Código obrigatório substituindo a linha analisada"'
+    suggestion_rules = "4. O campo \"suggestion\" é OBRIGATÓRIO.\n5. Sempre gere código substituindo exatamente a linha analisada."
+else:
+    suggestion_field = ', "suggestion": "codigo opcional em uma única linha quando possível"'
+    suggestion_rules = "4. O campo \"suggestion\" é opcional.\n5. Se existir suggestion, deve ser apenas o código puro."
     "MAX_COMMENTS_PER_FILE": 3
 }
 
