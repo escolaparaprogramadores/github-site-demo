@@ -23,7 +23,6 @@ OAI_API = "https://api.openai.com/v1/chat/completions"
 # ============================================================
 
 def bad(x, y, z):
-    # função com nome ruim
     a = x + y
     b = a * z
     c = 0
@@ -166,27 +165,53 @@ def changed_right_lines_from_patch(patch: str):
 
 
 # =============================
-# OPENAI CALL
+# REVIEW ENGINE
 # =============================
 
-def call_openai(payload, api_key, max_attempts=6):
-    body = json.dumps(payload).encode("utf-8")
+def fetch_pr_files(repo, token, pr_number):
+    files = []
+    page = 1
 
-    for attempt in range(1, max_attempts + 1):
-        try:
-            req = Request(OAI_API, headers=oai_headers(api_key), data=body)
-            with urlopen(req, timeout=90) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except HTTPError as e:
-            if not _should_retry_http_error(e.code):
-                raise
-            wait = _calculate_retry_wait(attempt, e.headers.get("Retry-After"))
-            time.sleep(wait)
-        except URLError:
-            wait = _calculate_retry_wait(attempt)
-            time.sleep(wait)
+    while True:
+        url = f"{GH_API}/repos/{repo}/pulls/{pr_number}/files?per_page=100&page={page}"
+        chunk = http_json(url, headers=gh_headers(token))
 
-    raise RuntimeError("OpenAI failed after retries")
+        if not chunk:
+            break
+
+        files.extend(chunk)
+
+        if len(chunk) < 100:
+            break
+
+        page += 1
+
+    selected = []
+    for f in files:
+        filename = f.get("filename")
+        patch = f.get("patch")
+        if filename and patch:
+            selected.append({"path": filename, "patch": patch})
+
+    return selected
+
+
+def publish_review(repo, token, pr_sha, pr_number, comments):
+    if not comments:
+        operation_skipped("Publicação", "Nenhum comentário")
+        return
+
+    review_payload = {
+        "commit_id": pr_sha,
+        "body": "## 🤖 AI Engineering Platform\n\nComentários gerados automaticamente.",
+        "event": "COMMENT",
+        "comments": comments
+    }
+
+    url = f"{GH_API}/repos/{repo}/pulls/{pr_number}/reviews"
+    http_json(url, method="POST",
+              headers=gh_headers(token),
+              body=json.dumps(review_payload).encode("utf-8"))
 
 
 # =============================
