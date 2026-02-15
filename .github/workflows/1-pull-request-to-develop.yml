@@ -1,4 +1,4 @@
-name: PR feature -> develop
+name: 1 - Pull Request to develop
 
 on:
   push:
@@ -9,22 +9,22 @@ permissions:
   contents: read
   pull-requests: write
 
+concurrency:
+  group: pr-feature-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   open_pr:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Create PR if not exists
+      - name: Create PR if not exists (feature -> develop)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BRANCH="${GITHUB_REF_NAME}"
+          BASE="develop"
 
-          # Se já existe PR aberta dessa branch para develop, não cria outra
-          EXISTING=$(gh pr list --head "$BRANCH" --base develop --state open --json number --jq '.[0].number' || true)
-
+          EXISTING=$(gh pr list --head "$BRANCH" --base "$BASE" --state open --json number --jq '.[0].number' || true)
           if [ -n "$EXISTING" ]; then
             echo "PR already exists: #$EXISTING"
             exit 0
@@ -32,6 +32,6 @@ jobs:
 
           gh pr create \
             --head "$BRANCH" \
-            --base develop \
-            --title "Merge $BRANCH -> develop" \
+            --base "$BASE" \
+            --title "Merge $BRANCH -> $BASE" \
             --body "PR automática criada a partir de push em $BRANCH."
