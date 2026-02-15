@@ -16,18 +16,19 @@ concurrency:
 jobs:
   open_pr:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Create PR if not exists (feature -> develop)
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}   # obrigatório pro gh
           REPO: ${{ github.repository }}
         run: |
+          set -e
+
+          if [ -z "$GH_TOKEN" ]; then
+            echo "ERRO: secret GH_PAT não encontrado ou vazio. Crie Settings > Secrets > Actions > GH_PAT"
+            exit 1
+          fi
+
           BRANCH="${GITHUB_REF_NAME}"
           BASE="develop"
 
