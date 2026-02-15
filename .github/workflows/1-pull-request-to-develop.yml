@@ -6,35 +6,25 @@ on:
       - "feature/**"
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
-
-concurrency:
-  group: pr-feature-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   open_pr:
     runs-on: ubuntu-latest
+
     steps:
+      - name: Authenticate GitHub CLI
+        run: echo "${{ secrets.GH_PAT }}" | gh auth login --with-token
+
       - name: Create PR if not exists (feature -> develop)
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}   # obrigatório pro gh
           REPO: ${{ github.repository }}
         run: |
           set -e
 
-          if [ -z "$GH_TOKEN" ]; then
-            echo "ERRO: secret GH_PAT não encontrado ou vazio. Crie Settings > Secrets > Actions > GH_PAT"
-            exit 1
-          fi
-
           BRANCH="${GITHUB_REF_NAME}"
           BASE="develop"
-
-          echo "Repo: $REPO"
-          echo "Head: $BRANCH"
-          echo "Base: $BASE"
 
           EXISTING=$(gh pr list \
             --repo "$REPO" \
