@@ -10,11 +10,6 @@ on:
         description: "Tag (ex: v1.0.3)"
         required: true
 
-
-  push:
-    tags:
-      - "v*.*.*"
-
 permissions:
   contents: read
 
