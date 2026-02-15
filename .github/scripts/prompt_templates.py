@@ -1,3 +1,4 @@
+
 """
 Templates de prompts para AI Code Review.
 
