@@ -19,10 +19,16 @@ jobs:
     steps:
       - name: Create PR if not exists (feature -> develop)
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}   # <<< AQUI
+          GH_TOKEN: ${{ secrets.GH_PAT }}   # obrigatório pro gh
           REPO: ${{ github.repository }}
         run: |
           set -e
+
+          if [ -z "$GH_TOKEN" ]; then
+            echo "ERRO: secret GH_PAT não encontrado ou vazio. Crie Settings > Secrets > Actions > GH_PAT"
+            exit 1
+          fi
+
           BRANCH="${GITHUB_REF_NAME}"
           BASE="develop"
 
