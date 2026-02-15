@@ -14,15 +14,34 @@ from logger import (
     operation_start, operation_success, operation_failed, operation_skipped
 )
 
-
 GH_API = "https://api.github.com"
 OAI_API = "https://api.openai.com/v1/chat/completions"
+
+
+# ============================================================
+# ⚠️ FUNÇÃO PROPOSITALMENTE RUIM (para forçar suggestion)
+# ============================================================
+
+def bad(x, y, z):
+    # função com nome ruim
+    a = x + y
+    b = a * z
+    c = 0
+    for i in range(0, 10):
+        if i % 2 == 0:
+            c += i
+        else:
+            c -= i
+    if b > 100:
+        print("Grande")
+    else:
+        print("Pequeno")
+    return b + c
 
 
 # =============================
 # ENVIRONMENT VALIDATION
 # =============================
-
 
 def _validate_environment():
     operation_start("Validação de ambiente")
@@ -171,150 +190,8 @@ def call_openai(payload, api_key, max_attempts=6):
 
 
 # =============================
-# REVIEW ENGINE
-# =============================
-
-
-def process_file_review(repo, token, pr_sha, pr_number, openai_key, path, patch):
-    if not AI_FEATURE_FLAGS["REVIEW_ENABLED"]:
-        operation_skipped(path, "Review desabilitado por flag")
-        return []
-
-    eligible_lines = sorted(list(changed_right_lines_from_patch(patch)))
-    if not eligible_lines:
-        operation_skipped(path, "Sem linhas modificadas")
-        return []
-
-    prompt = build_review_prompt(path, patch)
-
-    payload = {
-        "model": "gpt-4o-mini",
-        "messages": [
-            {"role": "system", "content": "Você é um engenheiro sênior. Responda somente JSON."},
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.1,
-        "max_tokens": 900
-    }
-
-    
-    try:
-        data = call_openai(payload, openai_key)
-    except Exception:
-        operation_failed(f"Review: {path}", "Falha na OpenAI API")
-        return []
-
-    choices = data.get("choices") or []
-    if not choices:
-        warning(f"OpenAI retornou vazio para {path}")
-        return []
-
-    message = choices[0].get("message") or {}
-    content = (message.get("content") or "").strip()
-
-    if not content:
-        return []
-
-    try:
-        obj = json.loads(content)
-    except Exception:
-        warning(f"Falha ao parsear JSON para {path}")
-        return []
-
-    comments = obj.get("comments", []) or []
-    eligible_set = set(eligible_lines)
-    file_comments = []
-
-    for c in comments[:AI_FEATURE_FLAGS["MAX_COMMENTS_PER_FILE"]]:
-        line = c.get("line")
-        body = c.get("body")
-
-        if not isinstance(line, int) or not body:
-            continue
-
-        if line not in eligible_set:
-            line = min(eligible_lines, key=lambda x: abs(x - line))
-
-        clean_body = body.strip()
-
-        # 🔥 GARANTIR BLOCO suggestion FUNCIONAL
-        if "```suggestion" in clean_body:
-            if not clean_body.strip().endswith("```"):
-                clean_body = clean_body.rstrip() + "\n```"
-
-            parts = clean_body.split("```suggestion")
-            if len(parts) == 2:
-                before = parts[0].strip()
-                suggestion_block = "```suggestion" + parts[1].strip()
-
-                if before:
-                    clean_body = before + "\n\n" + suggestion_block
-                else:
-                    clean_body = suggestion_block
-
-        file_comments.append({
-            "path": path,
-            "line": line,
-            "side": "RIGHT",
-            "body": clean_body
-        })
-
-    return file_comments
-
-
-
-def fetch_pr_files(repo, token, pr_number):
-    files = []
-    page = 1
-
-    while True:
-        url = f"{GH_API}/repos/{repo}/pulls/{pr_number}/files?per_page=100&page={page}"
-        chunk = http_json(url, headers=gh_headers(token))
-
-        if not chunk:
-            break
-
-        files.extend(chunk)
-
-        if len(chunk) < 100:
-            break
-
-        page += 1
-
-    selected = []
-    for f in files:
-        filename = f.get("filename")
-        patch = f.get("patch")
-        if filename and patch:
-            selected.append({"path": filename, "patch": patch})
-
-    return selected
-
-
-
-def publish_review(repo, token, pr_sha, pr_number, comments):
-    if not comments:
-        operation_skipped("Publicação", "Nenhum comentário")
-        return
-
-    review_payload = {
-        "commit_id": pr_sha,
-        "body": "## 🤖 AI Engineering Platform\n\nComentários gerados automaticamente.",
-        "event": "COMMENT",
-        "comments": comments
-    }
-
-    url = f"{GH_API}/repos/{repo}/pulls/{pr_number}/reviews"
-    http_json(url, method="POST",
-              headers=gh_headers(token),
-              body=json.dumps(review_payload).encode("utf-8"))
-
-
-# =============================
 # MAIN
 # =============================
-
-
 
 def main():
     info("=" * 60)
@@ -328,23 +205,6 @@ def main():
     if not files:
         operation_skipped("Processamento", "Nenhum patch textual")
         return
-
-    all_comments = []
-
-    
-    for item in files[:12]:
-        comments = process_file_review(
-            repo,
-            token,
-            pr_sha,
-            pr_number,
-            openai_key,
-            item["path"],
-            item["patch"]
-        )
-        all_comments.extend(comments)
-
-    publish_review(repo, token, pr_sha, pr_number, all_comments)
 
     success("AI Engineering Platform finalizada com sucesso!")
 
