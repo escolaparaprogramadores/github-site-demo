@@ -32,6 +32,7 @@ jobs:
       - name: Stop if develop was updated from main (avoid loop)
         run: |
           MSG=$(git log -1 --pretty=%B)
+          echo "Last commit message: $MSG"
           if echo "$MSG" | grep -qiE "from main|Merge branch 'main'"; then
             echo "Develop updated from main. Skipping."
             exit 0
@@ -41,6 +42,7 @@ jobs:
         id: semver
         run: |
           LAST_TAG=$(git tag -l "v[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | head -n 1)
+
           if [ -z "$LAST_TAG" ]; then
             NEXT_TAG="v1.0.0"
           else
@@ -49,6 +51,9 @@ jobs:
             PATCH=$((PATCH + 1))
             NEXT_TAG="v${MAJOR}.${MINOR}.${PATCH}"
           fi
+
+          echo "LAST_TAG=$LAST_TAG"
+          echo "NEXT_TAG=$NEXT_TAG"
           echo "next_tag=$NEXT_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Create release branch from develop and push
@@ -59,23 +64,44 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          # Se a branch já existe, não tenta recriar
           if git ls-remote --heads origin "$RELEASE_BRANCH" | grep -q "$RELEASE_BRANCH"; then
             echo "Release branch already exists: $RELEASE_BRANCH"
-          else
-            git checkout -b "$RELEASE_BRANCH"
-            git push -u origin "$RELEASE_BRANCH"
+            exit 0
           fi
+
+          git checkout -b "$RELEASE_BRANCH"
+          git push -u origin "$RELEASE_BRANCH"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create PR release -> main (if not exists)
+      - name: Create PR release -> main (only if there are changes)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ steps.semver.outputs.next_tag }}"
           RELEASE_BRANCH="release/${VERSION}"
+          BASE="main"
 
-          EXISTING=$(gh pr list --head "$RELEASE_BRANCH" --base main --state open --json number --jq '.[0].number' || true)
+          echo "Checking diff between $BASE and $RELEASE_BRANCH..."
+
+          git fetch origin "$BASE" "$RELEASE_BRANCH" --quiet
+
+          DIFF_COUNT=$(git rev-list --count "origin/$BASE..origin/$RELEASE_BRANCH")
+          echo "Commits ahead of $BASE: $DIFF_COUNT"
+
+          if [ "$DIFF_COUNT" -eq 0 ]; then
+            echo "Sem commits novos entre $BASE e $RELEASE_BRANCH. Não vou criar PR."
+            exit 0
+          fi
+
+          EXISTING=$(gh pr list \
+            --head "$RELEASE_BRANCH" \
+            --base "$BASE" \
+            --state open \
+            --json number \
+            --jq '.[0].number' || true)
+
           if [ -n "$EXISTING" ]; then
             echo "PR already exists: #$EXISTING"
             exit 0
@@ -83,6 +109,6 @@ jobs:
 
           gh pr create \
             --head "$RELEASE_BRANCH" \
-            --base main \
+            --base "$BASE" \
             --title "Release ${VERSION}" \
             --body "Criada automaticamente após pipeline do develop passar. Versão: ${VERSION}"
