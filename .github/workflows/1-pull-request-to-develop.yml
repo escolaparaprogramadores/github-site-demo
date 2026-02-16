@@ -5,53 +5,6 @@ on:
     branches:
       - "feature/**"
 
-permissions:
-  contents: read
-  pull-requests: write
-
-concurrency:
-  group: pr-feature-${{ github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  open_pr:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Create PR if not exists (feature -> develop)
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}   # obrigatório pro gh
-          REPO: ${{ github.repository }}
-        run: |
-          set -e
-
-          if [ -z "$GH_TOKEN" ]; then
-            echo "ERRO: secret GH_PAT não encontrado ou vazio. Crie Settings > Secrets > Actions > GH_PAT"
-            exit 1
-          fi
-
-          BRANCH="${GITHUB_REF_NAME}"
-          BASE="develop"
-
-          echo "Repo: $REPO"
-          echo "Head: $BRANCH"
-          echo "Base: $BASE"
-
-          EXISTING=$(gh pr list \
-            --repo "$REPO" \
-            --head "$BRANCH" \
-            --base "$BASE" \
-            --state open \
-            --json number \
-            --jq '.[0].number' || true)
-
-          if [ -n "$EXISTING" ]; then
-            echo "PR already exists: #$EXISTING"
-            exit 0
-          fi
-
-          gh pr create \
-            --repo "$REPO" \
-            --head "$BRANCH" \
-            --base "$BASE" \
-            --title "Merge $BRANCH -> $BASE" \
-            --body "PR automática criada a partir de push em $BRANCH."
+jobs: 
+  shared-job: 
+    uses: ./.github/reusable/1-pull-request-to-develop.yml
