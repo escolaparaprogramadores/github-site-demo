@@ -1,0 +1,21 @@
+{
+  "name": "github-actions-site",
+  "version": "1.0.0",
+  "description": "Site que faz parte do materiad para o curso de Github Actions",
+  "scripts": {
+    "build": "parcel build index.html",
+    "start": "live-server dist  --open=index.html",
+    "test": "mocha \"tests/**/*.js\"",
+    "test:coverage": "nyc --reporter=lcov --reporter=text mocha \"tests/**/*.js\""
+  },
+  "author": "Mark Roger",
+  "license": "MIT",
+  "devDependencies": {
+    "chai": "^4.5.0",
+    "jsdom": "^19.0.0",
+    "live-server": "^1.2.2",
+    "mocha": "^9.2.2",
+    "nyc": "^17.1.0",
+    "parcel": "^2.16.4"
+  }
+}
