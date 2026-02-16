@@ -20,5 +20,5 @@ concurrency:
 
 jobs: 
   shared-job: 
-    uses: .github/workflows/2-reusable-develop.yml
+    uses: .github/workflows/2-reusable-develop.yml@main
 
