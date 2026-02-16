@@ -8,4 +8,4 @@ on:
 jobs: 
   shared-job: 
     uses: ./.github/workflows/1-reusable-pull-request-to-develop.yml
-    secrets: inherit
+secrets: inherit
