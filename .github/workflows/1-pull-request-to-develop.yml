@@ -15,4 +15,4 @@ concurrency:
 
 jobs: 
   shared-job: 
-    uses: .github/workflows/1-reusable-pull-request-to-develop.yml@main
+    uses: ./.github/workflows/1-reusable-pull-request-to-develop.yml
