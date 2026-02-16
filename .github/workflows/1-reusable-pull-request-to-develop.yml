@@ -1,56 +1,47 @@
-  name: 1 - Pull Request to develop
+name: 1 - Pull Request to develop
 
-  on:
-    workflow_call: 
+on:
+  workflow_call:
 
-  jobs:
-    open_pr:
-      runs-on: ubuntu-latest
-      
-      permissions:
-        contents: read
-        pull-requests: write
+jobs:
+  open_pr:
+    runs-on: ubuntu-latest
 
-      concurrency:
-        group: pr-feature-${{ github.ref }}
-        cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: write
 
-      steps:
-        - name: Create PR if not exists (feature -> develop)
-          env:
-            GH_TOKEN: ${{ secrets.GH_PAT }}   # obrigatório pro gh
-            REPO: ${{ github.repository }}
-          run: |
-            set -e
+    concurrency:
+      group: pr-feature-${{ github.ref }}
+      cancel-in-progress: true
 
-            if [ -z "$GH_TOKEN" ]; then
-              echo "ERRO: secret GH_PAT não encontrado ou vazio. Crie Settings > Secrets > Actions > GH_PAT"
-              exit 1
-            fi
+    steps:
+      - name: Create PR if not exists (feature -> develop)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
 
-            BRANCH="${GITHUB_REF_NAME}"
-            BASE="develop"
+          BRANCH="${GITHUB_REF_NAME}"
+          BASE="develop"
 
-            echo "Repo: $REPO"
-            echo "Head: $BRANCH"
-            echo "Base: $BASE"
+          EXISTING=$(gh pr list \
+            --repo "$REPO" \
+            --head "$BRANCH" \
+            --base "$BASE" \
+            --state open \
+            --json number \
+            --jq '.[0].number' || true)
 
-            EXISTING=$(gh pr list \
-              --repo "$REPO" \
-              --head "$BRANCH" \
-              --base "$BASE" \
-              --state open \
-              --json number \
-              --jq '.[0].number' || true)
+          if [ -n "$EXISTING" ]; then
+            echo "PR already exists: #$EXISTING"
+            exit 0
+          fi
 
-            if [ -n "$EXISTING" ]; then
-              echo "PR already exists: #$EXISTING"
-              exit 0
-            fi
-
-            gh pr create \
-              --repo "$REPO" \
-              --head "$BRANCH" \
-              --base "$BASE" \
-              --title "Merge $BRANCH -> $BASE" \
-              --body "PR automática criada a partir de push em $BRANCH."
+          gh pr create \
+            --repo "$REPO" \
+            --head "$BRANCH" \
+            --base "$BASE" \
+            --title "Merge $BRANCH -> $BASE" \
+            --body "PR automática criada a partir de push em $BRANCH."
