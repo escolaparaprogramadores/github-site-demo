@@ -3,7 +3,7 @@ name: 4 - Production
 on:
   push:
     tags:
-      - "v*.*.*"
+      - "release/v*.*.*"
   workflow_dispatch:
     inputs:
       version:
