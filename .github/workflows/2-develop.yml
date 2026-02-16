@@ -13,5 +13,5 @@ on:
 
   jobs: 
   shared-job: 
-    uses: .github/reusable/2-develop.yml
+    uses: .github/workflows/2-reusable-develop.yml
 
