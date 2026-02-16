@@ -1,7 +1,7 @@
-name: 1 - Pull Request to develop
+  name: 1 - Pull Request to develop
 
-on:
-  workflow_call: 
+  on:
+    workflow_call: 
 
   jobs:
     open_pr:
