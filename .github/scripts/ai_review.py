@@ -8,7 +8,7 @@ import re
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from prompt_templates import build_review_prompt
+from prompt_templates import build_review_prompt, AI_FEATURE_FLAGS
 
 GH_API = "https://api.github.com"
 OAI_API = "https://api.openai.com/v1/responses"
@@ -100,9 +100,6 @@ def changed_right_lines_from_patch(patch):
 # ========================
 
 def extract_text_from_response(data):
-    """
-    Extrai texto de forma segura da Responses API
-    """
     try:
         return data["output"][0]["content"][0]["text"]
     except Exception:
@@ -174,14 +171,14 @@ def process_file_review(path, patch, openai_key):
 
     comments = []
 
+    force_button = AI_FEATURE_FLAGS.get("FORCE_GITHUB_SUGGESTION_BUTTON", False)
+
     for c in obj.get("comments", [])[:3]:
         if not isinstance(c, dict):
             continue
 
-        # linha sugerida pela IA
         line = c.get("line")
 
-        # valida linha
         if line not in eligible_lines:
             line = eligible_lines[0]
 
@@ -189,10 +186,24 @@ def process_file_review(path, patch, openai_key):
         comment = c.get("comment", "")
         suggestion = c.get("suggestion")
 
-        # habilita botão suggestion apenas se:
-        # - existir suggestion
-        # - for apenas 1 linha
-        if suggestion and "\n" not in suggestion.strip():
+        # ==========================
+        # NOVA LÓGICA COM FLAG
+        # ==========================
+
+        if force_button:
+            # Força botão para TODOS os casos
+            forced_code = suggestion if suggestion else comment
+
+            body = f"""**{title}**
+
+{comment}
+
+```suggestion
+{forced_code}
+```"""
+
+        elif suggestion and "\n" not in suggestion.strip():
+            # Comportamento seguro original
             body = f"""**{title}**
 
 {comment}
@@ -200,6 +211,7 @@ def process_file_review(path, patch, openai_key):
 ```suggestion
 {suggestion}
 ```"""
+
         else:
             body = f"""**{title}**
 
@@ -221,7 +233,6 @@ def process_file_review(path, patch, openai_key):
         })
 
     return comments
-
 
 
 # ========================
