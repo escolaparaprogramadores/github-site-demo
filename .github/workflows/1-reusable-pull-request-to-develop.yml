@@ -6,6 +6,15 @@
   jobs:
     open_pr:
       runs-on: ubuntu-latest
+      
+      permissions:
+      contents: read
+      pull-requests: write
+
+      concurrency:
+      group: pr-feature-${{ github.ref }}
+      cancel-in-progress: true
+
       steps:
         - name: Create PR if not exists (feature -> develop)
           env:
