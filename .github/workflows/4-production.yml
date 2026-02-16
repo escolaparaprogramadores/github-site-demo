@@ -1,5 +1,0 @@
-on:
-  workflow_dispatch:
-  push:
-    tags:
-      - "release/v*.*.*"
