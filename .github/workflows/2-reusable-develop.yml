@@ -3,13 +3,6 @@ name: 2 - Develop
 on:
   workflow_call: 
 
-permissions:
-  contents: read
-
-concurrency:
-  group: develop-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   test_build:
     name: Test + Coverage + Build

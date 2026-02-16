@@ -4,7 +4,15 @@ on:
   push:
     branches:
       - "feature/**"
+ 
+  permissions:
+    contents: read
+    pull-requests: write
 
+  concurrency:
+    group: pr-feature-${{ github.ref }}
+    cancel-in-progress: true
+    
 jobs: 
   shared-job: 
     uses: .github/workflows/1-reusable-pull-request-to-develop.yml

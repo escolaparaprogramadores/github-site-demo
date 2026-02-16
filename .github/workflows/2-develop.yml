@@ -11,6 +11,13 @@ on:
     branches:
       - develop
 
+  permissions:
+  contents: read
+
+  concurrency:
+  group: develop-${{ github.ref }}
+  cancel-in-progress: true
+
   jobs: 
   shared-job: 
     uses: .github/workflows/2-reusable-develop.yml

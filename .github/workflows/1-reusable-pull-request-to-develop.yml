@@ -3,14 +3,6 @@ name: 1 - Pull Request to develop
 on:
   workflow_call: 
 
-  permissions:
-    contents: read
-    pull-requests: write
-
-  concurrency:
-    group: pr-feature-${{ github.ref }}
-    cancel-in-progress: true
-
   jobs:
     open_pr:
       runs-on: ubuntu-latest
