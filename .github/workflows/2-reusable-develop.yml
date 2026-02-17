@@ -60,8 +60,8 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
-            -Dsonar.projectKey=keephouse
-            -Dsonar.projectName=keephouse
+            -Dsonar.projectKey=github-keephouse
+            -Dsonar.projectName=github-keephouse
             -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
 
   deploy_develop:
