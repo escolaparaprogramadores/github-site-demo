@@ -54,3 +54,4 @@
               --base "$BASE" \
               --title "Merge $BRANCH -> $BASE" \
               --body "PR automática criada a partir de push em $BRANCH."
+
