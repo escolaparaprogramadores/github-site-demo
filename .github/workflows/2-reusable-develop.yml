@@ -2,6 +2,11 @@ name: 2 - Develop
 
 on:
   workflow_call: 
+    secrets:
+      SONAR_HOST_URL:
+        required: true
+      SONAR_TOKEN:
+        required: true
 
 jobs:
   test_build:
@@ -60,8 +65,8 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
-            -Dsonar.projectKey=keephouse
-            -Dsonar.projectName=keephouse
+            -Dsonar.projectKey=github-keephouse
+            -Dsonar.projectName=github-keephouse
             -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
 
   deploy_develop:

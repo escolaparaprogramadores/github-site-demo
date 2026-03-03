@@ -1,0 +1,300 @@
+#!/bin/bash
+
+echo "===== CRIAÇÃO TESTE INTEGRADO .NET 8 ====="
+
+read -p "Nome do projeto principal (default: LambdaApp): " MAIN_PROJECT
+MAIN_PROJECT=${MAIN_PROJECT:-LambdaApp}
+
+read -p "Nome do domínio/contexto (ex: AtualizaPedidoCetipado): " DOMAIN
+if [ -z "$DOMAIN" ]; then
+  echo "Domínio é obrigatório."
+  exit 1
+fi
+
+read -p "Nome da Lambda AWS: " LAMBDA_NAME
+if [ -z "$LAMBDA_NAME" ]; then
+  echo "Lambda é obrigatória."
+  exit 1
+fi
+
+PROJECT_NAME="$DOMAIN.IntegratedTests"
+TEST_PATH="tests/$PROJECT_NAME"
+
+echo "Criando projeto $PROJECT_NAME..."
+
+# =============================
+# Criar projeto xUnit .NET 8
+# =============================
+dotnet new xunit -n $PROJECT_NAME -f net8.0
+mkdir -p tests
+mv $PROJECT_NAME tests/
+cd $TEST_PATH
+
+# =============================
+# Remover teste padrão
+# =============================
+rm UnitTest1.cs
+
+# =============================
+# Instalar pacotes
+# =============================
+dotnet add package SpecFlow --version 3.9.74
+dotnet add package SpecFlow.xUnit --version 3.9.74
+dotnet add package Microsoft.NET.Test.Sdk
+dotnet add package xunit
+dotnet add package xunit.runner.visualstudio
+dotnet add package AWSSDK.Lambda
+dotnet add package AWSSDK.SQS
+dotnet add package AWSSDK.SecretsManager
+dotnet add package AWSSDK.CloudWatch
+dotnet add package Npgsql
+dotnet add package Dapper
+dotnet add package coverlet.collector
+
+# =============================
+# Estrutura de pastas
+# =============================
+mkdir Features
+mkdir Steps
+mkdir Context
+mkdir -p Infrastructure/Aws
+mkdir -p Infrastructure/Database
+mkdir Configuration
+mkdir Hooks
+
+# =============================
+# specflow.json
+# =============================
+cat <<EOF > specflow.json
+{
+  "language": {
+    "feature": "pt-BR"
+  }
+}
+EOF
+
+# =============================
+# runsettings
+# =============================
+cat <<EOF > IntegratedTests.runsettings
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <ResultsDirectory>TestResults</ResultsDirectory>
+    <TargetFrameworkVersion>net8.0</TargetFrameworkVersion>
+    <MaxCpuCount>1</MaxCpuCount>
+    <TestSessionTimeout>600000</TestSessionTimeout>
+    <Culture>pt-BR</Culture>
+    <UICulture>pt-BR</UICulture>
+
+    <EnvironmentVariables>
+      <AWS_REGION>sa-east-1</AWS_REGION>
+      <LAMBDA_NAME>$LAMBDA_NAME</LAMBDA_NAME>
+      <DB_HOST>localhost</DB_HOST>
+      <DB_PORT>5432</DB_PORT>
+      <DB_NAME>ofertaspublicas</DB_NAME>
+      <DB_USER>dbuseritau</DB_USER>
+      <DB_PASSWORD>senha</DB_PASSWORD>
+    </EnvironmentVariables>
+  </RunConfiguration>
+</RunSettings>
+EOF
+
+# =============================
+# Configuração
+# =============================
+cat <<EOF > Configuration/TestEnvironmentConfig.cs
+namespace $PROJECT_NAME.Configuration;
+
+public class TestEnvironmentConfig
+{
+    public string AwsRegion => Get("AWS_REGION");
+    public string LambdaName => Get("LAMBDA_NAME");
+
+    public string ConnectionString =>
+        $"Host={Get("DB_HOST")};" +
+        $"Port={Get("DB_PORT")};" +
+        $"Username={Get("DB_USER")};" +
+        $"Password={Get("DB_PASSWORD")};" +
+        $"Database={Get("DB_NAME")};Timeout=600;CommandTimeout=600";
+
+    private static string Get(string key)
+    {
+        var value = Environment.GetEnvironmentVariable(key);
+        if (string.IsNullOrWhiteSpace(value))
+            throw new InvalidOperationException($"Variável '{key}' não configurada.");
+        return value;
+    }
+}
+EOF
+
+# =============================
+# Context
+# =============================
+cat <<EOF > Context/ScenarioContextData.cs
+namespace $PROJECT_NAME.Context;
+
+public class ScenarioContextData
+{
+    public Guid Id { get; set; }
+    public object? Payload { get; set; }
+    public string? Response { get; set; }
+}
+EOF
+
+# =============================
+# AWS Lambda Gateway
+# =============================
+cat <<EOF > Infrastructure/Aws/LambdaGateway.cs
+using Amazon;
+using Amazon.Lambda;
+using Amazon.Lambda.Model;
+using System.Text.Json;
+
+namespace $PROJECT_NAME.Infrastructure.Aws;
+
+public class LambdaGateway
+{
+    private readonly AmazonLambdaClient _client;
+    private readonly string _functionName;
+
+    public LambdaGateway(string region, string functionName)
+    {
+        _client = new AmazonLambdaClient(RegionEndpoint.GetBySystemName(region));
+        _functionName = functionName;
+    }
+
+    public async Task<string> InvokeAsync(object payload)
+    {
+        var request = new InvokeRequest
+        {
+            FunctionName = _functionName,
+            Payload = JsonSerializer.Serialize(payload)
+        };
+
+        var response = await _client.InvokeAsync(request);
+        using var reader = new StreamReader(response.Payload);
+        return await reader.ReadToEndAsync();
+    }
+}
+EOF
+
+# =============================
+# Postgres Repository
+# =============================
+cat <<EOF > Infrastructure/Database/PostgresRepository.cs
+using Dapper;
+using Npgsql;
+
+namespace $PROJECT_NAME.Infrastructure.Database;
+
+public class PostgresRepository
+{
+    private readonly string _connectionString;
+
+    public PostgresRepository(string connectionString)
+    {
+        _connectionString = connectionString;
+    }
+
+    public async Task<T?> QuerySingleAsync<T>(string sql, object param)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        return await conn.QuerySingleOrDefaultAsync<T>(sql, param);
+    }
+}
+EOF
+
+# =============================
+# Hooks
+# =============================
+cat <<EOF > Hooks/DependencyInjectionHooks.cs
+using BoDi;
+using TechTalk.SpecFlow;
+using $PROJECT_NAME.Configuration;
+using $PROJECT_NAME.Context;
+using $PROJECT_NAME.Infrastructure.Aws;
+using $PROJECT_NAME.Infrastructure.Database;
+
+namespace $PROJECT_NAME.Hooks;
+
+[Binding]
+public class DependencyInjectionHooks
+{
+    [BeforeScenario]
+    public void Register(IObjectContainer container)
+    {
+        var config = new TestEnvironmentConfig();
+
+        container.RegisterInstanceAs(config);
+        container.RegisterInstanceAs(new ScenarioContextData());
+        container.RegisterInstanceAs(new LambdaGateway(config.AwsRegion, config.LambdaName));
+        container.RegisterInstanceAs(new PostgresRepository(config.ConnectionString));
+    }
+}
+EOF
+
+# =============================
+# Feature dinâmica
+# =============================
+cat <<EOF > Features/$DOMAIN.feature
+#language: pt-br
+
+Funcionalidade: $DOMAIN
+
+Cenário: Execução integrada da lambda
+  Dado que envio um payload válido
+  Quando a lambda é executada
+  Então deve retornar sucesso
+EOF
+
+# =============================
+# Steps dinâmicos
+# =============================
+cat <<EOF > Steps/${DOMAIN}Steps.cs
+using TechTalk.SpecFlow;
+using Xunit;
+using $PROJECT_NAME.Context;
+using $PROJECT_NAME.Infrastructure.Aws;
+
+namespace $PROJECT_NAME.Steps;
+
+[Binding]
+public class ${DOMAIN}Steps
+{
+    private readonly ScenarioContextData _context;
+    private readonly LambdaGateway _lambda;
+
+    public ${DOMAIN}Steps(ScenarioContextData context, LambdaGateway lambda)
+    {
+        _context = context;
+        _lambda = lambda;
+    }
+
+    [Given("que envio um payload válido")]
+    public void GivenPayload()
+    {
+        _context.Payload = new { Id = Guid.NewGuid() };
+    }
+
+    [When("a lambda é executada")]
+    public async Task WhenExecuta()
+    {
+        _context.Response = await _lambda.InvokeAsync(_context.Payload!);
+    }
+
+    [Then("deve retornar sucesso")]
+    public void ThenValida()
+    {
+        Assert.NotNull(_context.Response);
+    }
+}
+EOF
+
+# =============================
+# Adicionar na Solution
+# =============================
+cd ../../
+dotnet sln add $TEST_PATH/$PROJECT_NAME.csproj
+
+echo "Projeto criado e adicionado à solution com sucesso."
