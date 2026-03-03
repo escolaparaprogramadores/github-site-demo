@@ -1,70 +1,45 @@
-Perfeito.
-Agora vou te entregar o passo a passo FINAL, organizado, direto ao ponto, para você sair do zero até estar rodando um <Domain>.IntegratedTests com:
-
-✅ .NET 8
-
-✅ xUnit
-
-✅ SpecFlow
-
-✅ AWS real
-
-✅ Postgres
-
-✅ IntegratedTests.runsettings
-
-✅ Arquitetura enterprise
-
-✅ Script reutilizável
-
-Sem pular nada.
-
-✅ PRÉ-REQUISITOS
-
-Antes de tudo, confirme:
-
-dotnet --version
-
-Deve ser 8.x.x.
-
-Se não for, instale o .NET 8 SDK.
-
-🧱 ETAPA 1 — Criar o gerador oficial
-
-Escolha uma pasta onde vai guardar seu gerador (ex: home ou repo utilitário):
-
-mkdir integrated-tests-cli
-cd integrated-tests-cli
-touch create-integrated-tests.sh
-chmod +x create-integrated-tests.sh
-🧠 ETAPA 2 — Cole ESTE SCRIPT COMPLETO
-
-Abra create-integrated-tests.sh e cole exatamente isso:
-
 #!/bin/bash
 
-DOMAIN=$1
+echo "===== CRIAÇÃO TESTE INTEGRADO .NET 8 ====="
 
+read -p "Nome do projeto principal (default: LambdaApp): " MAIN_PROJECT
+MAIN_PROJECT=${MAIN_PROJECT:-LambdaApp}
+
+read -p "Nome do domínio/contexto (ex: AtualizaPedidoCetipado): " DOMAIN
 if [ -z "$DOMAIN" ]; then
-  echo "Uso: ./create-integrated-tests.sh NomeDoDominio"
+  echo "Domínio é obrigatório."
+  exit 1
+fi
+
+read -p "Nome da Lambda AWS: " LAMBDA_NAME
+if [ -z "$LAMBDA_NAME" ]; then
+  echo "Lambda é obrigatória."
   exit 1
 fi
 
 PROJECT_NAME="$DOMAIN.IntegratedTests"
+TEST_PATH="tests/$PROJECT_NAME"
 
 echo "Criando projeto $PROJECT_NAME..."
 
-# ===============================
-# Criar projeto base
-# ===============================
-dotnet new xunit -n $PROJECT_NAME
-cd $PROJECT_NAME
+# =============================
+# Criar projeto xUnit .NET 8
+# =============================
+dotnet new xunit -n $PROJECT_NAME -f net8.0
+mkdir -p tests
+mv $PROJECT_NAME tests/
+cd $TEST_PATH
 
-# ===============================
+# =============================
+# Remover teste padrão
+# =============================
+rm UnitTest1.cs
+
+# =============================
 # Instalar pacotes
-# ===============================
-dotnet add package SpecFlow
-dotnet add package SpecFlow.xUnit
+# =============================
+dotnet add package SpecFlow --version 3.9.74
+dotnet add package SpecFlow.xUnit --version 3.9.74
 dotnet add package Microsoft.NET.Test.Sdk
 dotnet add package xunit
 dotnet add package xunit.runner.visualstudio
@@ -74,24 +49,22 @@ dotnet add package AWSSDK.SecretsManager
 dotnet add package AWSSDK.CloudWatch
 dotnet add package Npgsql
 dotnet add package Dapper
+dotnet add package coverlet.collector
 
-# ===============================
+# =============================
 # Estrutura de pastas
-# ===============================
+# =============================
 mkdir Features
 mkdir Steps
 mkdir Context
-mkdir -p Domain/Builders
-mkdir -p Domain/Assertions
-mkdir -p Domain/Dtos
 mkdir -p Infrastructure/Aws
 mkdir -p Infrastructure/Database
 mkdir Configuration
 mkdir Hooks
 
-# ===============================
+# =============================
 # specflow.json
-# ===============================
+# =============================
 cat <<EOF > specflow.json
 {
   "language": {
@@ -100,9 +73,9 @@ cat <<EOF > specflow.json
 }
 EOF
 
-# ===============================
-# IntegratedTests.runsettings
-# ===============================
+# =============================
+# runsettings
+# =============================
 cat <<EOF > IntegratedTests.runsettings
 <?xml version="1.0" encoding="utf-8"?>
 <RunSettings>
@@ -115,19 +88,21 @@ cat <<EOF > IntegratedTests.runsettings
     <UICulture>pt-BR</UICulture>
 
     <EnvironmentVariables>
-      <AWS_REGION>us-east-1</AWS_REGION>
-      <LAMBDA_NAME>nome-da-lambda</LAMBDA_NAME>
-      <POSTGRES_CONNECTION>
-        Host=localhost;Port=5432;Username=postgres;Password=postgres;Database=meubanco
-      </POSTGRES_CONNECTION>
+      <AWS_REGION>sa-east-1</AWS_REGION>
+      <LAMBDA_NAME>$LAMBDA_NAME</LAMBDA_NAME>
+      <DB_HOST>localhost</DB_HOST>
+      <DB_PORT>5432</DB_PORT>
+      <DB_NAME>ofertaspublicas</DB_NAME>
+      <DB_USER>dbuseritau</DB_USER>
+      <DB_PASSWORD>senha</DB_PASSWORD>
     </EnvironmentVariables>
   </RunConfiguration>
 </RunSettings>
 EOF
 
-# ===============================
-# Configuration
-# ===============================
+# =============================
+# Configuração
+# =============================
 cat <<EOF > Configuration/TestEnvironmentConfig.cs
 namespace $PROJECT_NAME.Configuration;
 
@@ -135,24 +110,27 @@ public class TestEnvironmentConfig
 {
     public string AwsRegion => Get("AWS_REGION");
     public string LambdaName => Get("LAMBDA_NAME");
-    public string PostgresConnection => Get("POSTGRES_CONNECTION");
+
+    public string ConnectionString =>
+        $"Host={Get("DB_HOST")};" +
+        $"Port={Get("DB_PORT")};" +
+        $"Username={Get("DB_USER")};" +
+        $"Password={Get("DB_PASSWORD")};" +
+        $"Database={Get("DB_NAME")};Timeout=600;CommandTimeout=600";
 
     private static string Get(string key)
     {
         var value = Environment.GetEnvironmentVariable(key);
-
         if (string.IsNullOrWhiteSpace(value))
-            throw new InvalidOperationException(
-                $"Variável de ambiente '{key}' não configurada no runsettings.");
-
+            throw new InvalidOperationException($"Variável '{key}' não configurada.");
         return value;
     }
 }
 EOF
 
-# ===============================
-# ScenarioContext
-# ===============================
+# =============================
+# Context
+# =============================
 cat <<EOF > Context/ScenarioContextData.cs
 namespace $PROJECT_NAME.Context;
 
@@ -164,51 +142,25 @@ public class ScenarioContextData
 }
 EOF
 
-# ===============================
-# AwsClientFactory
-# ===============================
-cat <<EOF > Infrastructure/Aws/AwsClientFactory.cs
-using Amazon;
-using Amazon.Lambda;
-
-namespace $PROJECT_NAME.Infrastructure.Aws;
-
-public class AwsClientFactory
-{
-    private readonly RegionEndpoint _region;
-
-    public AwsClientFactory(string region)
-    {
-        _region = RegionEndpoint.GetBySystemName(region);
-    }
-
-    public AmazonLambdaClient CreateLambda() => new AmazonLambdaClient(_region);
-}
-EOF
-
-# ===============================
-# LambdaGateway
-# ===============================
+# =============================
+# AWS Lambda Gateway
+# =============================
 cat <<EOF > Infrastructure/Aws/LambdaGateway.cs
+using Amazon;
 using Amazon.Lambda;
 using Amazon.Lambda.Model;
 using System.Text.Json;
 
 namespace $PROJECT_NAME.Infrastructure.Aws;
 
-public interface ILambdaGateway
-{
-    Task<string> InvokeAsync(object payload);
-}
-
-public class LambdaGateway : ILambdaGateway
+public class LambdaGateway
 {
     private readonly AmazonLambdaClient _client;
     private readonly string _functionName;
 
-    public LambdaGateway(AmazonLambdaClient client, string functionName)
+    public LambdaGateway(string region, string functionName)
     {
-        _client = client;
+        _client = new AmazonLambdaClient(RegionEndpoint.GetBySystemName(region));
         _functionName = functionName;
     }
 
@@ -227,21 +179,16 @@ public class LambdaGateway : ILambdaGateway
 }
 EOF
 
-# ===============================
-# PostgresRepository
-# ===============================
+# =============================
+# Postgres Repository
+# =============================
 cat <<EOF > Infrastructure/Database/PostgresRepository.cs
 using Dapper;
 using Npgsql;
 
 namespace $PROJECT_NAME.Infrastructure.Database;
 
-public interface IPostgresRepository
-{
-    Task<T?> QuerySingleAsync<T>(string sql, object param);
-}
-
-public class PostgresRepository : IPostgresRepository
+public class PostgresRepository
 {
     private readonly string _connectionString;
 
@@ -258,9 +205,9 @@ public class PostgresRepository : IPostgresRepository
 }
 EOF
 
-# ===============================
-# DependencyInjectionHooks
-# ===============================
+# =============================
+# Hooks
+# =============================
 cat <<EOF > Hooks/DependencyInjectionHooks.cs
 using BoDi;
 using TechTalk.SpecFlow;
@@ -278,58 +225,53 @@ public class DependencyInjectionHooks
     public void Register(IObjectContainer container)
     {
         var config = new TestEnvironmentConfig();
-        var factory = new AwsClientFactory(config.AwsRegion);
 
         container.RegisterInstanceAs(config);
         container.RegisterInstanceAs(new ScenarioContextData());
-
-        container.RegisterInstanceAs<ILambdaGateway>(
-            new LambdaGateway(factory.CreateLambda(), config.LambdaName));
-
-        container.RegisterInstanceAs<IPostgresRepository>(
-            new PostgresRepository(config.PostgresConnection));
+        container.RegisterInstanceAs(new LambdaGateway(config.AwsRegion, config.LambdaName));
+        container.RegisterInstanceAs(new PostgresRepository(config.ConnectionString));
     }
 }
 EOF
 
-# ===============================
-# Feature exemplo
-# ===============================
-cat <<EOF > Features/Sample.feature
+# =============================
+# Feature dinâmica
+# =============================
+cat <<EOF > Features/$DOMAIN.feature
 #language: pt-br
 
-Funcionalidade: Teste padrão
+Funcionalidade: $DOMAIN
 
-Cenário: Execução exemplo
-  Dado que envio um payload padrão
+Cenário: Execução integrada da lambda
+  Dado que envio um payload válido
   Quando a lambda é executada
   Então deve retornar sucesso
 EOF
 
-# ===============================
-# Step exemplo
-# ===============================
-cat <<EOF > Steps/SampleSteps.cs
+# =============================
+# Steps dinâmicos
+# =============================
+cat <<EOF > Steps/${DOMAIN}Steps.cs
 using TechTalk.SpecFlow;
+using Xunit;
 using $PROJECT_NAME.Context;
 using $PROJECT_NAME.Infrastructure.Aws;
-using Xunit;
 
 namespace $PROJECT_NAME.Steps;
 
 [Binding]
-public class SampleSteps
+public class ${DOMAIN}Steps
 {
     private readonly ScenarioContextData _context;
-    private readonly ILambdaGateway _lambda;
+    private readonly LambdaGateway _lambda;
 
-    public SampleSteps(ScenarioContextData context, ILambdaGateway lambda)
+    public ${DOMAIN}Steps(ScenarioContextData context, LambdaGateway lambda)
     {
         _context = context;
         _lambda = lambda;
     }
 
-    [Given("que envio um payload padrão")]
+    [Given("que envio um payload válido")]
     public void GivenPayload()
     {
         _context.Payload = new { Id = Guid.NewGuid() };
@@ -349,67 +291,10 @@ public class SampleSteps
 }
 EOF
 
-echo "Projeto $PROJECT_NAME criado com sucesso."
+# =============================
+# Adicionar na Solution
+# =============================
+cd ../../
+dotnet sln add $TEST_PATH/$PROJECT_NAME.csproj
 
-Salve.
-
-🚀 ETAPA 3 — Gerar um projeto real
-
-Vá para onde quer criar o projeto e rode:
-
-./create-integrated-tests.sh Payments
-
-Isso criará:
-
-Payments.IntegratedTests
-⚙️ ETAPA 4 — Ajustar runsettings
-
-Abra:
-
-Payments.IntegratedTests/IntegratedTests.runsettings
-
-Altere:
-
-<LAMBDA_NAME>nome-real-da-sua-lambda</LAMBDA_NAME>
-<POSTGRES_CONNECTION>string-real</POSTGRES_CONNECTION>
-▶️ ETAPA 5 — Rodar testes
-
-Dentro do projeto:
-
-dotnet test --settings IntegratedTests.runsettings
-
-Se quiser sempre usar o runsettings automaticamente, posso te passar como configurar.
-
-🎯 RESULTADO FINAL
-
-Você agora tem:
-
-Gerador reutilizável
-
-Arquitetura enterprise
-
-AWS real
-
-Banco real
-
-SpecFlow
-
-xUnit
-
-runsettings
-
-Namespace dinâmico
-
-Projeto padrão de mercado
-
-Se quiser, o próximo nível é:
-
-Criar versão que detecta e adiciona à Solution automaticamente
-
-Criar template oficial do dotnet (dotnet new)
-
-Criar múltiplos ambientes (Dev/Stage/Prod)
-
-Criar suporte futuro a LocalStack
-
-Qual próximo passo você quer dar?
+echo "Projeto criado e adicionado à solution com sucesso."
