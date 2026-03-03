@@ -1,0 +1,415 @@
+Perfeito.
+Agora vou te entregar o passo a passo FINAL, organizado, direto ao ponto, para você sair do zero até estar rodando um <Domain>.IntegratedTests com:
+
+✅ .NET 8
+
+✅ xUnit
+
+✅ SpecFlow
+
+✅ AWS real
+
+✅ Postgres
+
+✅ IntegratedTests.runsettings
+
+✅ Arquitetura enterprise
+
+✅ Script reutilizável
+
+Sem pular nada.
+
+✅ PRÉ-REQUISITOS
+
+Antes de tudo, confirme:
+
+dotnet --version
+
+Deve ser 8.x.x.
+
+Se não for, instale o .NET 8 SDK.
+
+🧱 ETAPA 1 — Criar o gerador oficial
+
+Escolha uma pasta onde vai guardar seu gerador (ex: home ou repo utilitário):
+
+mkdir integrated-tests-cli
+cd integrated-tests-cli
+touch create-integrated-tests.sh
+chmod +x create-integrated-tests.sh
+🧠 ETAPA 2 — Cole ESTE SCRIPT COMPLETO
+
+Abra create-integrated-tests.sh e cole exatamente isso:
+
+#!/bin/bash
+
+DOMAIN=$1
+
+if [ -z "$DOMAIN" ]; then
+  echo "Uso: ./create-integrated-tests.sh NomeDoDominio"
+  exit 1
+fi
+
+PROJECT_NAME="$DOMAIN.IntegratedTests"
+
+echo "Criando projeto $PROJECT_NAME..."
+
+# ===============================
+# Criar projeto base
+# ===============================
+dotnet new xunit -n $PROJECT_NAME
+cd $PROJECT_NAME
+
+# ===============================
+# Instalar pacotes
+# ===============================
+dotnet add package SpecFlow
+dotnet add package SpecFlow.xUnit
+dotnet add package Microsoft.NET.Test.Sdk
+dotnet add package xunit
+dotnet add package xunit.runner.visualstudio
+dotnet add package AWSSDK.Lambda
+dotnet add package AWSSDK.SQS
+dotnet add package AWSSDK.SecretsManager
+dotnet add package AWSSDK.CloudWatch
+dotnet add package Npgsql
+dotnet add package Dapper
+
+# ===============================
+# Estrutura de pastas
+# ===============================
+mkdir Features
+mkdir Steps
+mkdir Context
+mkdir -p Domain/Builders
+mkdir -p Domain/Assertions
+mkdir -p Domain/Dtos
+mkdir -p Infrastructure/Aws
+mkdir -p Infrastructure/Database
+mkdir Configuration
+mkdir Hooks
+
+# ===============================
+# specflow.json
+# ===============================
+cat <<EOF > specflow.json
+{
+  "language": {
+    "feature": "pt-BR"
+  }
+}
+EOF
+
+# ===============================
+# IntegratedTests.runsettings
+# ===============================
+cat <<EOF > IntegratedTests.runsettings
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <ResultsDirectory>TestResults</ResultsDirectory>
+    <TargetFrameworkVersion>net8.0</TargetFrameworkVersion>
+    <MaxCpuCount>1</MaxCpuCount>
+    <TestSessionTimeout>600000</TestSessionTimeout>
+    <Culture>pt-BR</Culture>
+    <UICulture>pt-BR</UICulture>
+
+    <EnvironmentVariables>
+      <AWS_REGION>us-east-1</AWS_REGION>
+      <LAMBDA_NAME>nome-da-lambda</LAMBDA_NAME>
+      <POSTGRES_CONNECTION>
+        Host=localhost;Port=5432;Username=postgres;Password=postgres;Database=meubanco
+      </POSTGRES_CONNECTION>
+    </EnvironmentVariables>
+  </RunConfiguration>
+</RunSettings>
+EOF
+
+# ===============================
+# Configuration
+# ===============================
+cat <<EOF > Configuration/TestEnvironmentConfig.cs
+namespace $PROJECT_NAME.Configuration;
+
+public class TestEnvironmentConfig
+{
+    public string AwsRegion => Get("AWS_REGION");
+    public string LambdaName => Get("LAMBDA_NAME");
+    public string PostgresConnection => Get("POSTGRES_CONNECTION");
+
+    private static string Get(string key)
+    {
+        var value = Environment.GetEnvironmentVariable(key);
+
+        if (string.IsNullOrWhiteSpace(value))
+            throw new InvalidOperationException(
+                $"Variável de ambiente '{key}' não configurada no runsettings.");
+
+        return value;
+    }
+}
+EOF
+
+# ===============================
+# ScenarioContext
+# ===============================
+cat <<EOF > Context/ScenarioContextData.cs
+namespace $PROJECT_NAME.Context;
+
+public class ScenarioContextData
+{
+    public Guid Id { get; set; }
+    public object? Payload { get; set; }
+    public string? Response { get; set; }
+}
+EOF
+
+# ===============================
+# AwsClientFactory
+# ===============================
+cat <<EOF > Infrastructure/Aws/AwsClientFactory.cs
+using Amazon;
+using Amazon.Lambda;
+
+namespace $PROJECT_NAME.Infrastructure.Aws;
+
+public class AwsClientFactory
+{
+    private readonly RegionEndpoint _region;
+
+    public AwsClientFactory(string region)
+    {
+        _region = RegionEndpoint.GetBySystemName(region);
+    }
+
+    public AmazonLambdaClient CreateLambda() => new AmazonLambdaClient(_region);
+}
+EOF
+
+# ===============================
+# LambdaGateway
+# ===============================
+cat <<EOF > Infrastructure/Aws/LambdaGateway.cs
+using Amazon.Lambda;
+using Amazon.Lambda.Model;
+using System.Text.Json;
+
+namespace $PROJECT_NAME.Infrastructure.Aws;
+
+public interface ILambdaGateway
+{
+    Task<string> InvokeAsync(object payload);
+}
+
+public class LambdaGateway : ILambdaGateway
+{
+    private readonly AmazonLambdaClient _client;
+    private readonly string _functionName;
+
+    public LambdaGateway(AmazonLambdaClient client, string functionName)
+    {
+        _client = client;
+        _functionName = functionName;
+    }
+
+    public async Task<string> InvokeAsync(object payload)
+    {
+        var request = new InvokeRequest
+        {
+            FunctionName = _functionName,
+            Payload = JsonSerializer.Serialize(payload)
+        };
+
+        var response = await _client.InvokeAsync(request);
+        using var reader = new StreamReader(response.Payload);
+        return await reader.ReadToEndAsync();
+    }
+}
+EOF
+
+# ===============================
+# PostgresRepository
+# ===============================
+cat <<EOF > Infrastructure/Database/PostgresRepository.cs
+using Dapper;
+using Npgsql;
+
+namespace $PROJECT_NAME.Infrastructure.Database;
+
+public interface IPostgresRepository
+{
+    Task<T?> QuerySingleAsync<T>(string sql, object param);
+}
+
+public class PostgresRepository : IPostgresRepository
+{
+    private readonly string _connectionString;
+
+    public PostgresRepository(string connectionString)
+    {
+        _connectionString = connectionString;
+    }
+
+    public async Task<T?> QuerySingleAsync<T>(string sql, object param)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        return await conn.QuerySingleOrDefaultAsync<T>(sql, param);
+    }
+}
+EOF
+
+# ===============================
+# DependencyInjectionHooks
+# ===============================
+cat <<EOF > Hooks/DependencyInjectionHooks.cs
+using BoDi;
+using TechTalk.SpecFlow;
+using $PROJECT_NAME.Configuration;
+using $PROJECT_NAME.Context;
+using $PROJECT_NAME.Infrastructure.Aws;
+using $PROJECT_NAME.Infrastructure.Database;
+
+namespace $PROJECT_NAME.Hooks;
+
+[Binding]
+public class DependencyInjectionHooks
+{
+    [BeforeScenario]
+    public void Register(IObjectContainer container)
+    {
+        var config = new TestEnvironmentConfig();
+        var factory = new AwsClientFactory(config.AwsRegion);
+
+        container.RegisterInstanceAs(config);
+        container.RegisterInstanceAs(new ScenarioContextData());
+
+        container.RegisterInstanceAs<ILambdaGateway>(
+            new LambdaGateway(factory.CreateLambda(), config.LambdaName));
+
+        container.RegisterInstanceAs<IPostgresRepository>(
+            new PostgresRepository(config.PostgresConnection));
+    }
+}
+EOF
+
+# ===============================
+# Feature exemplo
+# ===============================
+cat <<EOF > Features/Sample.feature
+#language: pt-br
+
+Funcionalidade: Teste padrão
+
+Cenário: Execução exemplo
+  Dado que envio um payload padrão
+  Quando a lambda é executada
+  Então deve retornar sucesso
+EOF
+
+# ===============================
+# Step exemplo
+# ===============================
+cat <<EOF > Steps/SampleSteps.cs
+using TechTalk.SpecFlow;
+using $PROJECT_NAME.Context;
+using $PROJECT_NAME.Infrastructure.Aws;
+using Xunit;
+
+namespace $PROJECT_NAME.Steps;
+
+[Binding]
+public class SampleSteps
+{
+    private readonly ScenarioContextData _context;
+    private readonly ILambdaGateway _lambda;
+
+    public SampleSteps(ScenarioContextData context, ILambdaGateway lambda)
+    {
+        _context = context;
+        _lambda = lambda;
+    }
+
+    [Given("que envio um payload padrão")]
+    public void GivenPayload()
+    {
+        _context.Payload = new { Id = Guid.NewGuid() };
+    }
+
+    [When("a lambda é executada")]
+    public async Task WhenExecuta()
+    {
+        _context.Response = await _lambda.InvokeAsync(_context.Payload!);
+    }
+
+    [Then("deve retornar sucesso")]
+    public void ThenValida()
+    {
+        Assert.NotNull(_context.Response);
+    }
+}
+EOF
+
+echo "Projeto $PROJECT_NAME criado com sucesso."
+
+Salve.
+
+🚀 ETAPA 3 — Gerar um projeto real
+
+Vá para onde quer criar o projeto e rode:
+
+./create-integrated-tests.sh Payments
+
+Isso criará:
+
+Payments.IntegratedTests
+⚙️ ETAPA 4 — Ajustar runsettings
+
+Abra:
+
+Payments.IntegratedTests/IntegratedTests.runsettings
+
+Altere:
+
+<LAMBDA_NAME>nome-real-da-sua-lambda</LAMBDA_NAME>
+<POSTGRES_CONNECTION>string-real</POSTGRES_CONNECTION>
+▶️ ETAPA 5 — Rodar testes
+
+Dentro do projeto:
+
+dotnet test --settings IntegratedTests.runsettings
+
+Se quiser sempre usar o runsettings automaticamente, posso te passar como configurar.
+
+🎯 RESULTADO FINAL
+
+Você agora tem:
+
+Gerador reutilizável
+
+Arquitetura enterprise
+
+AWS real
+
+Banco real
+
+SpecFlow
+
+xUnit
+
+runsettings
+
+Namespace dinâmico
+
+Projeto padrão de mercado
+
+Se quiser, o próximo nível é:
+
+Criar versão que detecta e adiciona à Solution automaticamente
+
+Criar template oficial do dotnet (dotnet new)
+
+Criar múltiplos ambientes (Dev/Stage/Prod)
+
+Criar suporte futuro a LocalStack
+
+Qual próximo passo você quer dar?
